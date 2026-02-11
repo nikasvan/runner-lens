@@ -22,7 +22,6 @@ function resample(values: number[], width: number): number[] {
 /** Render a sparkline string from numeric values. */
 export function sparkline(values: number[], width = 60): string {
   if (values.length < 2) return '';
-  // resample first — result is always ≤ width so spread is safe here
   const rs = resample(values, width);
   let min = rs[0], max = rs[0];
   for (let i = 1; i < rs.length; i++) {
@@ -51,6 +50,23 @@ export function intensityBar(values: number[], width = 60): string {
       return '·';
     })
     .join('');
+}
+
+/**
+ * Visual progress bar for use in markdown tables.
+ * e.g. progressBar(65, 15) → "█████████░░░░░░"
+ */
+export function progressBar(pct: number, width = 15): string {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const filled = Math.round((clamped / 100) * width);
+  return '█'.repeat(filled) + '░'.repeat(width - filled);
+}
+
+/** Status dot based on percentage thresholds. */
+export function statusDot(pct: number, warn = 80, crit = 95): string {
+  if (pct >= crit) return '🔴';
+  if (pct >= warn) return '🟡';
+  return '🟢';
 }
 
 /** Format bytes into a human-readable string. */

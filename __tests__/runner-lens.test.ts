@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { stats, safeMax, safeMin, safePct } from '../src/stats';
-import { sparkline, intensityBar, fmtBytes, fmtDuration } from '../src/charts';
+import { sparkline, intensityBar, fmtBytes, fmtDuration, progressBar, statusDot } from '../src/charts';
 import { evaluateAlerts } from '../src/alerts';
 import { recommend } from '../src/recommendations';
 import { processMetrics } from '../src/reporter';
@@ -163,6 +163,25 @@ describe('intensityBar', () => {
   });
 });
 
+describe('progressBar', () => {
+  it('produces correct width', () => {
+    expect(progressBar(50, 10)).toHaveLength(10);
+    expect(progressBar(0, 10)).toBe('░░░░░░░░░░');
+    expect(progressBar(100, 10)).toBe('██████████');
+  });
+
+  it('clamps values', () => {
+    expect(progressBar(-10, 5)).toBe('░░░░░');
+    expect(progressBar(200, 5)).toBe('█████');
+  });
+});
+
+describe('statusDot', () => {
+  it('returns green for low values', () => expect(statusDot(50)).toBe('🟢'));
+  it('returns yellow for warning', () => expect(statusDot(85)).toBe('🟡'));
+  it('returns red for critical', () => expect(statusDot(96)).toBe('🔴'));
+});
+
 describe('fmtBytes', () => {
   it('formats zero', () => expect(fmtBytes(0)).toBe('0 B'));
   it('formats KB', () => expect(fmtBytes(1024)).toBe('1 KB'));
@@ -295,10 +314,12 @@ describe('processMetrics', () => {
     expect(report.cpu.avg).toBe(45);
     expect(report.memory.total_mb).toBe(7168);
 
-    // Markdown
+    // New markdown format
     expect(markdown).toContain('RunnerLens');
-    expect(markdown).toContain('CPU');
-    expect(markdown).toContain('Memory');
+    expect(markdown).toContain('Dashboard');
+    expect(markdown).toContain('**CPU**');
+    expect(markdown).toContain('**Memory**');
+    expect(markdown).toContain('█'); // progress bars
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
@@ -344,16 +365,14 @@ describe('processMetrics', () => {
     expect(report.memory.swap_max_mb).toBe(768);
   });
 
-  it('generates sparklines only in full mode', () => {
+  it('generates timeline in full and compact but not minimal', () => {
     const samples = Array(10).fill(null).map((_, i) =>
       makeSample({ timestamp: 1700000000 + i * 3, cpu: { user: i * 10, system: 5, idle: 85 - i * 10, iowait: 0, steal: 0, usage: i * 10 + 5 } }),
     );
     const full = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'full' }), 30);
-    const compact = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'compact' }), 30);
-    // Full should contain sparkline chars
-    expect(full.markdown).toMatch(/[▁▂▃▄▅▆▇█]/);
-    // Compact should NOT contain sparkline chars
-    expect(compact.markdown).not.toMatch(/[▁▂▃▄▅▆▇█]/);
+    const minimal = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30);
+    expect(full.markdown).toContain('Timeline');
+    expect(minimal.markdown).not.toContain('Timeline');
   });
 });
 

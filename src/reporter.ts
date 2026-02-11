@@ -5,11 +5,11 @@ import type {
 import { stats, safeMax, safePct } from './stats';
 import { evaluateAlerts } from './alerts';
 import { recommend } from './recommendations';
-import { sparkline, intensityBar, fmtBytes, fmtDuration } from './charts';
+import { sparkline, progressBar, statusDot, fmtBytes, fmtDuration } from './charts';
 import { REPORT_VERSION } from './constants';
 
 // ─────────────────────────────────────────────────────────────
-// Aggregation
+// Aggregation (unchanged)
 // ─────────────────────────────────────────────────────────────
 
 function aggregate(
@@ -36,7 +36,6 @@ function aggregate(
     ? loadVals.reduce((a, b) => a + b, 0) / loadVals.length
     : 0;
 
-  // Top processes: keep highest-CPU snapshot per unique name
   const procMap = new Map<string, ProcessInfo>();
   for (const s of samples) {
     for (const p of s.processes ?? []) {
@@ -89,14 +88,8 @@ function aggregate(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Markdown generation
+// Markdown — redesigned for readability
 // ─────────────────────────────────────────────────────────────
-
-function icon(level: string): string {
-  if (level === 'critical') return '🔴';
-  if (level === 'warning')  return '🟡';
-  return '🔵';
-}
 
 function badge(report: AggregatedReport): string {
   if (report.alerts.some((a) => a.level === 'critical')) return '🔴 Critical';
@@ -110,123 +103,147 @@ function markdown(
   config: MonitorConfig,
 ): string {
   const full    = config.summaryStyle === 'full';
-  const compact = config.summaryStyle === 'compact';
-  const o       = full ? ' open' : '';
+  const minimal = config.summaryStyle === 'minimal';
   const L: string[] = [];
 
-  // Header
-  L.push('## 📊 RunnerLens — Resource Report\n');
+  const cpuAvgPct = report.cpu.avg;
+  const cpuPeakPct = report.cpu.max;
+  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
+  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
+  const diskPct = report.disk_space[0]?.usage_pct ?? 0;
+  const diskFree = report.disk_space[0]?.available_mb ?? 0;
+
+  // ── Header: status + runner summary on one line ────────
+  L.push('## 📊 RunnerLens\n');
   L.push(
-    `**${badge(report)}** &nbsp;|&nbsp; ` +
-    `**Duration:** ${fmtDuration(report.duration_seconds)} &nbsp;|&nbsp; ` +
-    `**Samples:** ${report.sample_count}\n`,
+    `**${badge(report)}** · ` +
+    `${report.system.cpu_count} cores · ` +
+    `${(report.system.total_memory_mb / 1024).toFixed(1)} GB RAM · ` +
+    `${fmtDuration(report.duration_seconds)} · ` +
+    `${report.sample_count} samples\n`,
   );
 
-  // Alerts
-  if (report.alerts.length) {
-    L.push(`<details open><summary><strong>⚠️ Alerts (${report.alerts.length})</strong></summary>\n`);
-    for (const a of report.alerts) L.push(`${icon(a.level)} **${a.metric}:** ${a.message}  `);
-    L.push('\n</details>\n');
-  }
+  // ── Action items first (recommendations + alerts) ──────
+  const actions = [
+    ...report.recommendations,
+    ...(report.memory.swap_max_mb > 0
+      ? [`⚠️ **Swap detected** — peak ${report.memory.swap_max_mb} MB. Your job is running out of memory.`]
+      : []),
+  ];
 
-  // System
-  L.push(`<details${o}><summary><strong>🖥️ Runner</strong></summary>\n`);
-  L.push('| | |');
-  L.push('|---|---|');
-  L.push(`| **CPUs** | ${report.system.cpu_count} × ${report.system.cpu_model} |`);
-  L.push(`| **RAM** | ${report.system.total_memory_mb.toLocaleString()} MB |`);
-  L.push(`| **OS** | ${report.system.os_release} |`);
-  L.push(`| **Kernel** | ${report.system.kernel} |`);
-  L.push(`| **Runner** | ${report.system.runner_name} (${report.system.runner_os}/${report.system.runner_arch}) |`);
-  L.push('\n</details>\n');
-
-  // CPU
-  const cpuV = samples.map((s) => s.cpu.usage);
-  L.push(`<details${full || compact ? ' open' : ''}><summary><strong>🔥 CPU</strong></summary>\n`);
-  L.push('| Metric | Value |');
-  L.push('|---|---|');
-  L.push(`| Average | **${report.cpu.avg.toFixed(1)} %** |`);
-  L.push(`| Peak | ${report.cpu.max.toFixed(1)} % |`);
-  L.push(`| p95 | ${report.cpu.p95.toFixed(1)} % |`);
-  L.push(`| p99 | ${report.cpu.p99.toFixed(1)} % |`);
-  if (full && cpuV.length >= 4) {
+  if (actions.length > 0) {
+    L.push('### ⚡ Action Required\n');
+    for (const a of actions) L.push(`${a}\n`);
     L.push('');
-    L.push('```');
-    L.push(`  CPU %  ${sparkline(cpuV, 52)}`);
-    L.push(`         ${intensityBar(cpuV, 52)}`);
-    L.push('```');
   }
-  L.push('\n</details>\n');
 
-  // Memory
-  const memPct = samples.map((s) => s.memory.usage_pct);
-  L.push(`<details${full || compact ? ' open' : ''}><summary><strong>🧠 Memory</strong></summary>\n`);
-  L.push('| Metric | Value |');
-  L.push('|---|---|');
-  L.push(`| Total | ${report.memory.total_mb.toLocaleString()} MB |`);
-  L.push(`| Avg used | **${report.memory.avg.toFixed(0)} MB** (${safePct(report.memory.avg, report.memory.total_mb).toFixed(1)} %) |`);
-  L.push(`| Peak used | ${report.memory.max.toFixed(0)} MB (${safePct(report.memory.max, report.memory.total_mb).toFixed(1)} %) |`);
-  L.push(`| p95 | ${report.memory.p95.toFixed(0)} MB |`);
-  if (report.memory.swap_max_mb > 0) {
-    L.push(`| Swap peak | ⚠️ ${report.memory.swap_max_mb} MB |`);
-  }
-  if (full && memPct.length >= 4) {
-    L.push('');
-    L.push('```');
-    L.push(`  MEM %  ${sparkline(memPct, 52)}`);
-    L.push(`         ${intensityBar(memPct, 52)}`);
-    L.push('```');
-  }
-  L.push('\n</details>\n');
+  // ── Dashboard: visual overview table ───────────────────
+  L.push('### Dashboard\n');
+  L.push('| | Resource | Usage | Peak | Detail |');
+  L.push('|:---:|---|---|---|---|');
 
-  // Disk I/O
+  // CPU row
+  L.push(
+    `| ${statusDot(cpuAvgPct, config.thresholds.cpu_warn, config.thresholds.cpu_crit)} ` +
+    `| **CPU** ` +
+    `| \`${progressBar(cpuAvgPct)}\` **${cpuAvgPct.toFixed(0)}%** avg ` +
+    `| ${cpuPeakPct.toFixed(0)}% ` +
+    `| p95: ${report.cpu.p95.toFixed(0)}% · p99: ${report.cpu.p99.toFixed(0)}% |`,
+  );
+
+  // Memory row
+  const memUsedGB = (report.memory.avg / 1024).toFixed(1);
+  const memTotalGB = (report.memory.total_mb / 1024).toFixed(1);
+  L.push(
+    `| ${statusDot(memAvgPct, config.thresholds.mem_warn, config.thresholds.mem_crit)} ` +
+    `| **Memory** ` +
+    `| \`${progressBar(memAvgPct)}\` **${memAvgPct.toFixed(0)}%** avg ` +
+    `| ${memPeakPct.toFixed(0)}% ` +
+    `| ${memUsedGB} / ${memTotalGB} GB |`,
+  );
+
+  // Disk row
   if (config.includeDisk) {
-    L.push(`<details${o}><summary><strong>💾 Disk</strong></summary>\n`);
-    L.push('| Metric | Value |');
-    L.push('|---|---|');
-    L.push(`| Read | ${fmtBytes(report.disk_io.total_read_mb * 1024 * 1024)} (${report.disk_io.avg_read_mbps.toFixed(1)} MB/s avg) |`);
-    L.push(`| Written | ${fmtBytes(report.disk_io.total_write_mb * 1024 * 1024)} (${report.disk_io.avg_write_mbps.toFixed(1)} MB/s avg) |`);
-    if (report.disk_space.length) {
-      L.push('');
-      L.push('| Mount | Usage | Free |');
-      L.push('|---|---|---|');
-      for (const d of report.disk_space)
-        L.push(`| \`${d.mount}\` | ${d.usage_pct} % | ${fmtBytes(d.available_mb * 1024 * 1024)} |`);
+    const diskRead = fmtBytes(report.disk_io.total_read_mb * 1024 * 1024);
+    const diskWrite = fmtBytes(report.disk_io.total_write_mb * 1024 * 1024);
+    L.push(
+      `| ${statusDot(diskPct, 80, 90)} ` +
+      `| **Disk** ` +
+      `| \`${progressBar(diskPct)}\` **${diskPct}%** used ` +
+      `| ${fmtBytes(diskFree * 1024 * 1024)} free ` +
+      `| ${diskRead} read · ${diskWrite} written |`,
+    );
+  }
+
+  // Network row
+  if (config.includeNetwork) {
+    const rxTotal = fmtBytes(report.network.total_rx_mb * 1024 * 1024);
+    const txTotal = fmtBytes(report.network.total_tx_mb * 1024 * 1024);
+    L.push(
+      `| 🟢 ` +
+      `| **Network** ` +
+      `| ${rxTotal} ↓ · ${txTotal} ↑ ` +
+      `| ` +
+      `| ${report.network.avg_rx_mbps.toFixed(1)} MB/s avg ↓ |`,
+    );
+  }
+
+  L.push('');
+
+  // ── Alerts (only if not already shown via actions) ─────
+  const pureAlerts = report.alerts.filter((a) =>
+    a.metric !== 'Swap', // swap already shown in actions
+  );
+  if (pureAlerts.length > 0) {
+    L.push('<details open><summary><strong>🚨 Alerts</strong></summary>\n');
+    for (const a of pureAlerts) {
+      const icon = a.level === 'critical' ? '🔴' : a.level === 'warning' ? '🟡' : '🔵';
+      L.push(`${icon} **${a.metric}** — ${a.message}  `);
     }
     L.push('\n</details>\n');
   }
 
-  // Network
-  if (config.includeNetwork) {
-    L.push(`<details${o}><summary><strong>🌐 Network</strong></summary>\n`);
-    L.push('| Metric | Value |');
-    L.push('|---|---|');
-    L.push(`| Received | ${fmtBytes(report.network.total_rx_mb * 1024 * 1024)} (${report.network.avg_rx_mbps.toFixed(2)} MB/s avg) |`);
-    L.push(`| Sent | ${fmtBytes(report.network.total_tx_mb * 1024 * 1024)} (${report.network.avg_tx_mbps.toFixed(2)} MB/s avg) |`);
+  // ── Timeline sparklines ────────────────────────────────
+  if (!minimal) {
+    const cpuV = samples.map((s) => s.cpu.usage);
+    const memV = samples.map((s) => s.memory.usage_pct);
+    if (cpuV.length >= 4) {
+      L.push('<details open><summary><strong>📈 Timeline</strong></summary>\n');
+      L.push('```');
+      L.push(`  CPU  ${sparkline(cpuV, 50)}  ${cpuAvgPct.toFixed(0)}% avg`);
+      L.push(`  MEM  ${sparkline(memV, 50)}  ${memAvgPct.toFixed(0)}% avg`);
+      L.push('```');
+      L.push('\n</details>\n');
+    }
+  }
+
+  // ── Top processes (collapsed) ──────────────────────────
+  if (full && config.includeProcesses && report.top_processes.length > 0) {
+    L.push('<details><summary><strong>🔄 Top Processes</strong></summary>\n');
+    L.push('| Process | Peak CPU | Memory |');
+    L.push('|---|---:|---:|');
+    for (const p of report.top_processes.slice(0, 6)) {
+      L.push(`| \`${p.name}\` | ${p.cpu_pct.toFixed(1)}% | ${p.mem_mb.toFixed(0)} MB |`);
+    }
     L.push('\n</details>\n');
   }
 
-  // Top processes
-  if (config.includeProcesses && report.top_processes.length) {
-    L.push(`<details${o}><summary><strong>🔄 Top Processes (peak CPU)</strong></summary>\n`);
-    L.push('| Process | CPU | Memory |');
-    L.push('|---|---|---|');
-    for (const p of report.top_processes.slice(0, 8))
-      L.push(`| \`${p.name}\` | ${p.cpu_pct.toFixed(1)} % | ${p.mem_mb.toFixed(0)} MB |`);
+  // ── Runner details (collapsed) ─────────────────────────
+  if (full) {
+    L.push('<details><summary><strong>🖥️ Runner Details</strong></summary>\n');
+    L.push(
+      `**CPU:** ${report.system.cpu_count} × ${report.system.cpu_model}  \n` +
+      `**RAM:** ${report.system.total_memory_mb.toLocaleString()} MB  \n` +
+      `**OS:** ${report.system.os_release} · Kernel ${report.system.kernel}  \n` +
+      `**Runner:** ${report.system.runner_name} (${report.system.runner_os}/${report.system.runner_arch})`,
+    );
     L.push('\n</details>\n');
   }
 
-  // Recommendations
-  if (report.recommendations.length) {
-    L.push('<details open><summary><strong>💡 Recommendations</strong></summary>\n');
-    for (const rec of report.recommendations) L.push(`- ${rec}`);
-    L.push('\n</details>\n');
-  }
-
-  // Footer
+  // ── Footer ─────────────────────────────────────────────
   L.push('---');
   L.push(
-    `<sub>Generated by <a href="https://runnerlens.com">RunnerLens</a> ` +
+    `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +
     `v${REPORT_VERSION} · ${report.started_at} → ${report.ended_at}</sub>`,
   );
 

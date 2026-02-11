@@ -5,7 +5,7 @@ import { parseConfig } from './config';
 import { processMetrics } from './reporter';
 import { sendToApi } from './api-client';
 import { safePct } from './stats';
-import { fetchSteps, fetchStepsFromRuntime, correlateSteps } from './steps';
+import { fetchSteps, correlateSteps } from './steps';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
 } from './constants';
@@ -119,32 +119,17 @@ async function run(): Promise<void> {
 
     core.info(`RunnerLens: ${samples.length} samples over ${dur}s`);
 
-    // ── Fetch per-step data ─────────────────────────────
+    // ── Fetch per-step data (needs actions:read permission) ──
     let steps: StepMetrics[] | undefined;
-
-    // 1) Try GitHub REST API (needs actions:read)
     if (config.githubToken) {
       try {
         const rawSteps = await fetchSteps(config.githubToken);
         if (rawSteps.length > 0) {
           steps = correlateSteps(rawSteps, samples);
-          core.info(`RunnerLens: correlated ${steps.length} steps via GitHub API`);
+          core.info(`RunnerLens: correlated ${steps.length} steps`);
         }
       } catch (e) {
-        core.debug(`RunnerLens: GitHub API step fetch failed — ${e}`);
-      }
-    }
-
-    // 2) Fallback: internal Actions Runtime timeline API (no permissions needed)
-    if (!steps || steps.length === 0) {
-      try {
-        const rawSteps = await fetchStepsFromRuntime();
-        if (rawSteps.length > 0) {
-          steps = correlateSteps(rawSteps, samples);
-          core.info(`RunnerLens: correlated ${steps.length} steps via runtime API`);
-        }
-      } catch (e) {
-        core.debug(`RunnerLens: runtime API step fetch failed — ${e}`);
+        core.debug(`RunnerLens: step fetch failed — ${e}`);
       }
     }
 

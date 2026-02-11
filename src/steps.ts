@@ -125,37 +125,47 @@ export async function fetchStepsFromRuntime(): Promise<GitHubStep[]> {
   }
 
   const payload = decodeJwtPayload(token);
-  const claimKeys = Object.keys(payload);
-  core.info(`RunnerLens: runtime token claims: ${claimKeys.join(', ')}`);
+  const planId = payload.plan_id ?? payload.PlanId ?? payload.planId;
 
-  // The JWT may expose plan/timeline IDs under various claim names
-  const planId = payload.PlanId ?? payload.planId ?? payload.plan_id;
-  const timelineId = payload.TimeLineId ?? payload.timelineId ?? payload.timeline_id;
-
-  if (!planId || !timelineId) {
-    core.info(`RunnerLens: PlanId/TimeLineId not in token — trying URL-based discovery`);
-
-    // Try extracting IDs from ACTIONS_RUNTIME_URL path segments
-    // Format may be: https://pipelines.actions.githubusercontent.com/{guid}/
-    // or contain plan info in query params
-    core.info(`RunnerLens: runtime URL pattern: ${runtimeUrl.replace(/[a-f0-9-]{36}/gi, '{GUID}')}`);
+  if (!planId) {
+    core.info('RunnerLens: plan_id not found in runtime token');
     return [];
   }
 
   const base = runtimeUrl.replace(/\/+$/, '');
-  const url = `${base}/_apis/distributedtask/hubs/Actions/plans/${planId}/timeline/${timelineId}`;
+  const headers = { Authorization: `Bearer ${token}` };
 
-  const res = await httpGet(url, {
-    Authorization: `Bearer ${token}`,
-  });
+  // Resolve timeline ID: check JWT claims first, otherwise list timelines
+  let timelineId = payload.timeline_id ?? payload.TimeLineId ?? payload.orch_id;
+
+  if (!timelineId) {
+    const listUrl = `${base}/_apis/distributedtask/hubs/Actions/plans/${planId}/timelines`;
+    const listRes = await httpGet(listUrl, headers);
+    if (listRes.status !== 200) {
+      core.info(`RunnerLens: timelines list returned ${listRes.status}`);
+      return [];
+    }
+    const timelines = (JSON.parse(listRes.body).value ?? []) as { id: string }[];
+    if (timelines.length === 0) {
+      core.info('RunnerLens: no timelines found for plan');
+      return [];
+    }
+    timelineId = timelines[0].id;
+  }
+
+  // Fetch timeline records (steps)
+  const url = `${base}/_apis/distributedtask/hubs/Actions/plans/${planId}/timelines/${timelineId}`;
+  const res = await httpGet(url, headers);
 
   if (res.status !== 200) {
-    core.debug(`RunnerLens: timeline API returned ${res.status}`);
+    core.info(`RunnerLens: timeline API returned ${res.status}`);
     return [];
   }
 
   const data = JSON.parse(res.body);
   const records: TimelineRecord[] = data.records ?? data.value ?? [];
+
+  core.info(`RunnerLens: timeline returned ${records.length} records`);
 
   // "Task" records are workflow steps; sort by execution order
   return records

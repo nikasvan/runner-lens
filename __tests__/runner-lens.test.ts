@@ -490,12 +490,19 @@ describe('fetchStepsFromRuntime', () => {
     expect(result).toEqual([]);
   });
 
-  it('returns empty when token has no PlanId/TimeLineId', async () => {
+  it('returns empty when token has no plan_id', async () => {
     const payload = Buffer.from(JSON.stringify({ sub: 'test' })).toString('base64url');
     process.env.ACTIONS_RUNTIME_URL = 'https://example.com/';
     process.env.ACTIONS_RUNTIME_TOKEN = `header.${payload}.signature`;
     const result = await fetchStepsFromRuntime();
     expect(result).toEqual([]);
+  });
+
+  it('throws on network error (caught by caller)', async () => {
+    const payload = Buffer.from(JSON.stringify({ plan_id: 'test-plan' })).toString('base64url');
+    process.env.ACTIONS_RUNTIME_URL = 'https://localhost:1/';
+    process.env.ACTIONS_RUNTIME_TOKEN = `header.${payload}.signature`;
+    await expect(fetchStepsFromRuntime()).rejects.toThrow();
   });
 
   it('returns empty when token is malformed', async () => {

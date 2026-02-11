@@ -505,6 +505,16 @@ describe('fetchStepsFromRuntime', () => {
     await expect(fetchStepsFromRuntime()).rejects.toThrow();
   });
 
+  it('tries orch_id and job_id as timeline candidates', async () => {
+    const payload = Buffer.from(JSON.stringify({
+      plan_id: 'p', orch_id: 'o', job_id: 'j',
+    })).toString('base64url');
+    process.env.ACTIONS_RUNTIME_URL = 'https://localhost:1/';
+    process.env.ACTIONS_RUNTIME_TOKEN = `header.${payload}.signature`;
+    // Will fail on network but exercises the candidate-building branches
+    await expect(fetchStepsFromRuntime()).rejects.toThrow();
+  });
+
   it('returns empty when token is malformed', async () => {
     process.env.ACTIONS_RUNTIME_URL = 'https://example.com/';
     process.env.ACTIONS_RUNTIME_TOKEN = 'not-a-jwt';

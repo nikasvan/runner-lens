@@ -27,9 +27,9 @@ inputs:
     required: false
     default: 'true'
   github-token:
-    description: 'GitHub token for per-step metrics (optional)'
+    description: 'GitHub token for per-step metrics (defaults to the built-in token)'
     required: false
-    default: ''
+    default: ${{ github.token }}
   summary-style:
     description: 'Report style in Job Summary: full | compact | minimal | none'
     required: false

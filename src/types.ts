@@ -123,6 +123,7 @@ export interface AggregatedReport {
   recommendations: string[];
   steps?: StepMetrics[];
   collector?: { avg_cpu_pct: number; avg_mem_mb: number; max_mem_mb: number };
+  reporter?: { cpu_pct: number; mem_mb: number };
 }
 
 export interface IngestPayload {

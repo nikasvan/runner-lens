@@ -16,6 +16,7 @@ interface GitHubStep {
 
 interface GitHubJob {
   name: string;
+  status: string;
   steps: GitHubStep[];
 }
 
@@ -76,8 +77,11 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
   const data = JSON.parse(res.body);
   const jobs: GitHubJob[] = data.jobs ?? [];
 
-  // Find current job by name
-  const current = jobs.find((j) => j.name === job);
+  // Find current job: try exact key match, then display-name match,
+  // then fall back to the in-progress job (handles custom `name:` on jobs).
+  const current =
+    jobs.find((j) => j.name === job) ??
+    jobs.find((j) => j.status === 'in_progress');
   if (!current) {
     core.debug(`RunnerLens: could not find job "${job}" in API response`);
     return [];

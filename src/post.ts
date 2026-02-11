@@ -87,6 +87,9 @@ function loadSystemInfo(): SystemInfo {
 // ─────────────────────────────────────────────────────────────
 
 async function run(): Promise<void> {
+  const cpuStart = process.cpuUsage();
+  const wallStart = Date.now();
+
   try {
     if (core.getState(STATE.ACTIVE) !== 'true') {
       core.info('RunnerLens: monitoring was not active — nothing to report');
@@ -134,6 +137,15 @@ async function run(): Promise<void> {
     // ── Process ───────────────────────────────────────────
     const { report, markdown } = processMetrics(samples, sysInfo, config, dur, steps);
 
+    // ── Reporter self-monitoring ──────────────────────────
+    const cpuDelta = process.cpuUsage(cpuStart);
+    const wallSec = (Date.now() - wallStart) / 1000;
+    const reporterCpuPct = wallSec > 0
+      ? ((cpuDelta.user + cpuDelta.system) / 1e6) / wallSec * 100
+      : 0;
+    const reporterMemMb = process.memoryUsage().rss / (1024 * 1024);
+    report.reporter = { cpu_pct: reporterCpuPct, mem_mb: reporterMemMb };
+
     // ── Outputs ───────────────────────────────────────────
     core.setOutput('cpu-avg', report.cpu.avg.toFixed(1));
     core.setOutput('cpu-max', report.cpu.max.toFixed(1));
@@ -148,7 +160,8 @@ async function run(): Promise<void> {
 
     // ── Job Summary ───────────────────────────────────────
     if (markdown) {
-      await core.summary.addRaw(markdown).write();
+      const reporterInfo = ` · Reporter: ${reporterCpuPct.toFixed(1)}% CPU · ${reporterMemMb.toFixed(1)} MB RAM`;
+      await core.summary.addRaw(markdown.replace('</sub>', `${reporterInfo}</sub>`)).write();
       core.info('RunnerLens: report written to Job Summary');
     }
 

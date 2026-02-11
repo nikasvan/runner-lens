@@ -22,7 +22,11 @@ export function parseConfig(): MonitorConfig {
     ? (style as MonitorConfig['summaryStyle'])
     : 'full';
 
-  const githubToken = core.getInput('github-token');
+  // Auto-detect: explicit input → GITHUB_TOKEN env → ACTIONS_RUNTIME_TOKEN env
+  const githubToken = core.getInput('github-token')
+    || process.env.GITHUB_TOKEN
+    || process.env.ACTIONS_RUNTIME_TOKEN
+    || '';
 
   return {
     sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),

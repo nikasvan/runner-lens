@@ -2,7 +2,7 @@
 
 **Zero-config observability for GitHub Actions runners.**
 
-Drop RunnerLens into any workflow and get CPU, memory, disk I/O, and network metrics with sparkline charts directly in your Job Summary — no infrastructure required.
+Drop RunnerLens into any workflow and get CPU and memory metrics with sparkline charts directly in your Job Summary — no infrastructure required.
 
 ## Quick Start
 
@@ -22,10 +22,10 @@ That's it. When the job finishes, you'll see a resource report in the **Job Summ
 
 - **CPU** — average, peak, p95, p99 with sparkline timeline
 - **Memory** — usage, swap detection, pressure alerts
-- **Disk I/O** — total read/written, throughput, space warnings
-- **Network** — bytes received/sent, packet counts
-- **Alerts** — threshold-based warnings for CPU, memory, swap, I/O wait, CPU steal, disk space
-- **Recommendations** — right-sizing advice (oversized runner, CPU saturation, cache opportunities)
+- **Per-Step Breakdown** — CPU/memory usage and duration for each workflow step
+- **Collector Overhead** — RunnerLens' own CPU/memory footprint
+- **Alerts** — threshold-based warnings for CPU, memory, swap, I/O wait, CPU steal
+- **Recommendations** — right-sizing advice (oversized runner, CPU saturation)
 - **Top Processes** — peak CPU consumers across the job
 
 ## Inputs
@@ -36,8 +36,7 @@ That's it. When the job finishes, you'll see a resource report in the **Job Summ
 | `api-endpoint` | `https://api.runnerlens.com` | API endpoint override |
 | `sample-interval` | `3` | Seconds between samples (1–30) |
 | `include-processes` | `true` | Capture top processes |
-| `include-network` | `true` | Capture network I/O |
-| `include-disk` | `true` | Capture disk I/O and space |
+| `github-token` | `''` | GitHub token for per-step metrics (optional) |
 | `summary-style` | `full` | Report detail: `full` \| `compact` \| `minimal` \| `none` |
 | `max-file-size` | `100` | Max metrics file size in MB before rotation (0 = unlimited) |
 | `threshold-cpu-warn` | `80` | CPU % warning threshold |
@@ -55,10 +54,6 @@ That's it. When the job finishes, you'll see a resource report in the **Job Summ
 | `mem-avg-mb` | `2048` | Average memory usage (MB) |
 | `mem-max-mb` | `3584` | Peak memory usage (MB) |
 | `mem-avg-pct` | `56.3` | Average memory usage % |
-| `disk-read-mb` | `245.3` | Total disk read (MB) |
-| `disk-write-mb` | `89.7` | Total disk written (MB) |
-| `net-rx-mb` | `312.8` | Total network received (MB) |
-| `net-tx-mb` | `24.5` | Total network sent (MB) |
 | `samples` | `120` | Number of samples collected |
 | `duration-seconds` | `360` | Monitoring wall-clock duration |
 | `report-json` | `{...}` | Full report as JSON |
@@ -88,7 +83,7 @@ RunnerLens uses a two-phase design:
 1. **Main step** — spawns a lightweight bash collector as a detached background process
 2. **Post step** (`post-if: always()`) — stops the collector, aggregates data, writes the Job Summary
 
-The bash collector reads directly from `/proc` (CPU, memory, disk, network) with <0.5% CPU overhead. It outputs one JSON line per sample to a temp file.
+The bash collector reads directly from `/proc` (CPU, memory) with <0.5% CPU overhead. It outputs one JSON line per sample to a temp file.
 
 ### File Rotation
 

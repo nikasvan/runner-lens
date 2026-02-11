@@ -7,8 +7,9 @@ import { sparkline, intensityBar, fmtBytes, fmtDuration, progressBar, statusDot 
 import { evaluateAlerts } from '../src/alerts';
 import { recommend } from '../src/recommendations';
 import { processMetrics } from '../src/reporter';
+import { correlateSteps } from '../src/steps';
 import type {
-  MetricSample, SystemInfo, MonitorConfig,
+  MetricSample, SystemInfo, MonitorConfig, StepMetrics,
 } from '../src/types';
 
 // ─────────────────────────────────────────────────────────────
@@ -30,6 +31,7 @@ function makeSample(overrides: Partial<MetricSample> = {}): MetricSample {
       { pid: 100, name: 'node', cpu_pct: 35.0, mem_mb: 256 },
       { pid: 101, name: 'npm', cpu_pct: 10.0, mem_mb: 128 },
     ],
+    collector: { cpu_pct: 0.2, mem_mb: 3.5 },
     ...overrides,
   };
 }
@@ -55,6 +57,7 @@ function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
     maxSizeMb: 100,
     apiKey: '',
     apiEndpoint: 'https://api.runnerlens.com',
+    githubToken: '',
     thresholds: { cpu_warn: 80, cpu_crit: 95, mem_warn: 80, mem_crit: 95 },
     ...overrides,
   };
@@ -352,6 +355,108 @@ describe('processMetrics', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// steps.ts — correlateSteps
+// ─────────────────────────────────────────────────────────────
+
+describe('correlateSteps', () => {
+  it('maps samples to step time windows', () => {
+    const samples = [
+      makeSample({ timestamp: 1700000000 }),
+      makeSample({ timestamp: 1700000003 }),
+      makeSample({ timestamp: 1700000006 }),
+      makeSample({ timestamp: 1700000009, cpu: { user: 80, system: 10, idle: 5, iowait: 3, steal: 2, usage: 95 } }),
+      makeSample({ timestamp: 1700000012 }),
+    ];
+
+    const steps = correlateSteps(
+      [
+        { name: 'Checkout', number: 1, status: 'completed', started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' },
+        { name: 'Build', number: 2, status: 'completed', started_at: '2023-11-14T22:13:27Z', completed_at: '2023-11-14T22:13:33Z' },
+      ],
+      samples,
+    );
+
+    expect(steps).toHaveLength(2);
+    expect(steps[0].name).toBe('Checkout');
+    expect(steps[0].duration_seconds).toBe(6);
+    expect(steps[0].sample_count).toBe(3); // timestamps 0, 3, 6
+    expect(steps[1].name).toBe('Build');
+    expect(steps[1].sample_count).toBe(2); // timestamps 9, 12
+    expect(steps[1].cpu_max).toBe(95);
+  });
+
+  it('returns empty for empty inputs', () => {
+    expect(correlateSteps([], [makeSample()])).toEqual([]);
+    expect(correlateSteps(
+      [{ name: 'X', number: 1, status: 'completed', started_at: '2023-01-01T00:00:00Z', completed_at: '2023-01-01T00:01:00Z' }],
+      [],
+    )).toEqual([]);
+  });
+
+  it('handles steps with no matching samples', () => {
+    const steps = correlateSteps(
+      [{ name: 'Quick', number: 1, status: 'completed', started_at: '2020-01-01T00:00:00Z', completed_at: '2020-01-01T00:00:01Z' }],
+      [makeSample({ timestamp: 1700000000 })],
+    );
+    expect(steps[0].sample_count).toBe(0);
+    expect(steps[0].cpu_avg).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// collector self-monitoring
+// ─────────────────────────────────────────────────────────────
+
+describe('collector stats', () => {
+  it('includes collector overhead in report', () => {
+    const s = makeSample({ collector: { cpu_pct: 0.3, mem_mb: 4.0 } });
+    const { report } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
+    expect(report.collector).toBeDefined();
+    expect(report.collector!.avg_cpu_pct).toBeCloseTo(0.3);
+    expect(report.collector!.avg_mem_mb).toBeCloseTo(4.0);
+    expect(report.collector!.max_mem_mb).toBeCloseTo(4.0);
+  });
+
+  it('omits collector stats when samples lack collector field', () => {
+    const s = makeSample({ collector: undefined });
+    const { report } = processMetrics([s], makeSysInfo(), makeConfig(), 3);
+    expect(report.collector).toBeUndefined();
+  });
+
+  it('shows collector info in footer', () => {
+    const s = makeSample({ collector: { cpu_pct: 0.5, mem_mb: 3.2 } });
+    const { markdown } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
+    expect(markdown).toContain('Collector:');
+    expect(markdown).toContain('0.5% CPU');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// per-step markdown
+// ─────────────────────────────────────────────────────────────
+
+describe('per-step markdown', () => {
+  it('renders per-step table when steps provided', () => {
+    const s1 = makeSample({ timestamp: 1700000000 });
+    const s2 = makeSample({ timestamp: 1700000003 });
+    const steps: StepMetrics[] = [
+      { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
+      { name: 'Build', number: 2, duration_seconds: 120, cpu_avg: 67, cpu_max: 95, mem_avg_mb: 2300, mem_max_mb: 3100, sample_count: 40 },
+    ];
+    const { markdown } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    expect(markdown).toContain('Per-Step Breakdown');
+    expect(markdown).toContain('Checkout');
+    expect(markdown).toContain('Build');
+  });
+
+  it('omits per-step table when no steps', () => {
+    const s = makeSample();
+    const { markdown } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
+    expect(markdown).not.toContain('Per-Step Breakdown');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
 // Edge cases & safety
 // ─────────────────────────────────────────────────────────────
 
@@ -384,5 +489,6 @@ describe('edge cases', () => {
     };
     const { report } = processMetrics([sparse], makeSysInfo(), makeConfig(), 3);
     expect(report.top_processes).toEqual([]);
+    expect(report.collector).toBeUndefined();
   });
 });

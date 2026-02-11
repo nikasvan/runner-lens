@@ -1,6 +1,6 @@
 import type {
   MetricSample, SystemInfo, MonitorConfig,
-  AggregatedReport, ProcessInfo,
+  AggregatedReport, ProcessInfo, StepMetrics,
 } from './types';
 import { stats, safeMax, safePct } from './stats';
 import { evaluateAlerts } from './alerts';
@@ -17,6 +17,7 @@ function aggregate(
   sysInfo: SystemInfo,
   config: MonitorConfig,
   durationSec: number,
+  steps?: StepMetrics[],
 ): AggregatedReport {
   const cpuStats = stats(samples.map((s) => s.cpu.usage));
   const memStats = stats(samples.map((s) => s.memory.used_mb));
@@ -38,6 +39,20 @@ function aggregate(
   const topProcs = [...procMap.values()].sort((a, b) => b.cpu_pct - a.cpu_pct).slice(0, 10);
 
   const last = samples[samples.length - 1];
+
+  // ── Collector self-monitoring stats ─────────────────────
+  const collSamples = samples.filter((s) => s.collector);
+  let collector: AggregatedReport['collector'];
+  if (collSamples.length > 0) {
+    const cpuVals = collSamples.map((s) => s.collector!.cpu_pct);
+    const memVals = collSamples.map((s) => s.collector!.mem_mb);
+    collector = {
+      avg_cpu_pct: cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length,
+      avg_mem_mb: memVals.reduce((a, b) => a + b, 0) / memVals.length,
+      max_mem_mb: safeMax(memVals),
+    };
+  }
+
   const alerts = evaluateAlerts(samples, config, cpuStats, memStats, memTotal);
 
   const report: AggregatedReport = {
@@ -56,6 +71,8 @@ function aggregate(
     top_processes: topProcs,
     alerts,
     recommendations: [],
+    ...(steps && steps.length > 0 ? { steps } : {}),
+    ...(collector ? { collector } : {}),
   };
 
   report.recommendations = recommend(report, samples);
@@ -137,6 +154,27 @@ function markdown(
 
   L.push('');
 
+  // ── Per-step breakdown ───────────────────────────────────
+  if (report.steps && report.steps.length > 0) {
+    L.push('<details open><summary><strong>📋 Per-Step Breakdown</strong></summary>\n');
+    L.push('| # | Step | Duration | CPU avg | CPU peak | Mem avg | Mem peak |');
+    L.push('|---:|---|---:|---:|---:|---:|---:|');
+    for (const s of report.steps) {
+      const memAvgGB = (s.mem_avg_mb / 1024).toFixed(1);
+      const memMaxGB = (s.mem_max_mb / 1024).toFixed(1);
+      L.push(
+        `| ${s.number} ` +
+        `| ${s.name} ` +
+        `| ${fmtDuration(s.duration_seconds)} ` +
+        `| ${s.cpu_avg.toFixed(0)}% ` +
+        `| ${s.cpu_max.toFixed(0)}% ` +
+        `| ${memAvgGB} GB ` +
+        `| ${memMaxGB} GB |`,
+      );
+    }
+    L.push('\n</details>\n');
+  }
+
   // ── Alerts (only if not already shown via actions) ─────
   const pureAlerts = report.alerts.filter((a) =>
     a.metric !== 'Swap', // swap already shown in actions
@@ -189,9 +227,12 @@ function markdown(
 
   // ── Footer ─────────────────────────────────────────────
   L.push('---');
+  const collectorInfo = report.collector
+    ? ` · Collector: ${report.collector.avg_cpu_pct.toFixed(1)}% CPU · ${report.collector.avg_mem_mb.toFixed(1)} MB RAM`
+    : '';
   L.push(
     `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +
-    `v${REPORT_VERSION} · ${report.started_at} → ${report.ended_at}</sub>`,
+    `v${REPORT_VERSION} · ${report.started_at} → ${report.ended_at}${collectorInfo}</sub>`,
   );
 
   return L.join('\n');
@@ -206,8 +247,9 @@ export function processMetrics(
   sysInfo: SystemInfo,
   config: MonitorConfig,
   durationSec: number,
+  steps?: StepMetrics[],
 ): { report: AggregatedReport; markdown: string } {
-  const report = aggregate(samples, sysInfo, config, durationSec);
+  const report = aggregate(samples, sysInfo, config, durationSec, steps);
   const md = config.summaryStyle === 'none' ? '' : markdown(report, samples, config);
   return { report, markdown: md };
 }

@@ -34,12 +34,18 @@ export interface LoadAverage {
   load15: number;
 }
 
+export interface CollectorSample {
+  cpu_pct: number;
+  mem_mb: number;
+}
+
 export interface MetricSample {
   timestamp: number;
   cpu: CpuSample;
   memory: MemorySample;
   load: LoadAverage;
   processes: ProcessInfo[];
+  collector?: CollectorSample;
 }
 
 export interface SystemInfo {
@@ -67,6 +73,7 @@ export interface MonitorConfig {
   maxSizeMb: number;
   apiKey: string;
   apiEndpoint: string;
+  githubToken: string;
   thresholds: ThresholdConfig;
 }
 
@@ -88,6 +95,17 @@ export interface Alert {
   threshold: number;
 }
 
+export interface StepMetrics {
+  name: string;
+  number: number;
+  duration_seconds: number;
+  cpu_avg: number;
+  cpu_max: number;
+  mem_avg_mb: number;
+  mem_max_mb: number;
+  sample_count: number;
+}
+
 export interface AggregatedReport {
   version: string;
   system: SystemInfo;
@@ -103,6 +121,8 @@ export interface AggregatedReport {
   top_processes: ProcessInfo[];
   alerts: Alert[];
   recommendations: string[];
+  steps?: StepMetrics[];
+  collector?: { avg_cpu_pct: number; avg_mem_mb: number; max_mem_mb: number };
 }
 
 export interface IngestPayload {

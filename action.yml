@@ -26,6 +26,10 @@ inputs:
     description: 'Capture top processes by CPU/memory'
     required: false
     default: 'true'
+  github-token:
+    description: 'GitHub token for per-step metrics (optional)'
+    required: false
+    default: ''
   summary-style:
     description: 'Report style in Job Summary: full | compact | minimal | none'
     required: false

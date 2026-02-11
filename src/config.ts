@@ -22,6 +22,8 @@ export function parseConfig(): MonitorConfig {
     ? (style as MonitorConfig['summaryStyle'])
     : 'full';
 
+  const githubToken = core.getInput('github-token');
+
   return {
     sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),
     includeProcesses: core.getInput('include-processes') !== 'false',
@@ -29,6 +31,7 @@ export function parseConfig(): MonitorConfig {
     maxSizeMb: Math.max(0, intInput('max-file-size', 100)),
     apiKey,
     apiEndpoint: core.getInput('api-endpoint') || 'https://api.runnerlens.com',
+    githubToken,
     thresholds: {
       cpu_warn: clamp(intInput('threshold-cpu-warn', 80), 1, 100),
       cpu_crit: clamp(intInput('threshold-cpu-crit', 95), 1, 100),

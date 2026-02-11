@@ -1,10 +1,11 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
-import type { MetricSample, SystemInfo } from './types';
+import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
 import { processMetrics } from './reporter';
 import { sendToApi } from './api-client';
 import { safePct } from './stats';
+import { fetchSteps, correlateSteps } from './steps';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
 } from './constants';
@@ -116,8 +117,22 @@ async function run(): Promise<void> {
 
     core.info(`RunnerLens: ${samples.length} samples over ${dur}s`);
 
+    // ── Fetch per-step data (if token provided) ─────────
+    let steps: StepMetrics[] | undefined;
+    if (config.githubToken) {
+      try {
+        const rawSteps = await fetchSteps(config.githubToken);
+        if (rawSteps.length > 0) {
+          steps = correlateSteps(rawSteps, samples);
+          core.info(`RunnerLens: correlated ${steps.length} steps`);
+        }
+      } catch (e) {
+        core.debug(`RunnerLens: step fetch failed — ${e}`);
+      }
+    }
+
     // ── Process ───────────────────────────────────────────
-    const { report, markdown } = processMetrics(samples, sysInfo, config, dur);
+    const { report, markdown } = processMetrics(samples, sysInfo, config, dur, steps);
 
     // ── Outputs ───────────────────────────────────────────
     core.setOutput('cpu-avg', report.cpu.avg.toFixed(1));

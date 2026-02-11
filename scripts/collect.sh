@@ -38,6 +38,19 @@ trap 'exit 0' SIGTERM SIGINT
 
 # ── previous-sample state for delta calculations ───────────
 p_user=0 p_nice=0 p_sys=0 p_idle=0 p_iow=0 p_irq=0 p_sirq=0 p_steal=0
+p_self_ticks=0
+
+# ── collector self-monitoring ──────────────────────────────
+readonly CLK_TCK=$(getconf CLK_TCK 2>/dev/null || echo 100)
+
+read_self_cpu_ticks() {
+  # /proc/self/stat fields 14=utime 15=stime (1-indexed)
+  awk '{print $14+$15}' /proc/self/stat 2>/dev/null || echo 0
+}
+
+read_self_mem_mb() {
+  awk '/^VmRSS:/ {printf "%.1f", $2/1024; exit}' /proc/self/status 2>/dev/null || echo 0
+}
 
 # ── helpers ────────────────────────────────────────────────
 
@@ -112,6 +125,7 @@ maybe_rotate() {
 
 # ── seed previous counters (first read is discarded) ───────
 read -r p_user p_nice p_sys p_idle p_iow p_irq p_sirq p_steal <<< "$(read_cpu_raw)"
+p_self_ticks=$(read_self_cpu_ticks)
 
 sleep "$INTERVAL"
 
@@ -138,6 +152,15 @@ while true; do
   # ── Load ────────────────────────────────────────────────
   read -r l1 l5 l15 <<< "$(read_load)"
 
+  # ── Collector self-monitoring ────────────────────────────
+  c_self_ticks=$(read_self_cpu_ticks)
+  c_self_delta=$(( c_self_ticks - p_self_ticks ))
+  (( c_self_delta < 0 )) && c_self_delta=0
+  c_self_cpu=$(awk -v d="$c_self_delta" -v hz="$CLK_TCK" -v i="$INTERVAL" \
+    'BEGIN { v=d/(hz*i)*100; if(v>100)v=100; printf "%.1f",v }')
+  c_self_mem=$(read_self_mem_mb)
+  p_self_ticks=$c_self_ticks
+
   # ── Processes ───────────────────────────────────────────
   pr='"processes":[]'
   if (( OPT_PROC )); then
@@ -147,11 +170,11 @@ while true; do
   # ── Rotate if needed, then emit JSONL line ──────────────
   maybe_rotate
 
-  printf '{"timestamp":%s,"cpu":{"user":%s,"system":%s,"idle":%s,"iowait":%s,"steal":%s,"usage":%s},"memory":{"total_mb":%s,"used_mb":%s,"available_mb":%s,"cached_mb":%s,"swap_total_mb":%s,"swap_used_mb":%s,"usage_pct":%s},"load":{"load1":%s,"load5":%s,"load15":%s},%s}\n' \
+  printf '{"timestamp":%s,"cpu":{"user":%s,"system":%s,"idle":%s,"iowait":%s,"steal":%s,"usage":%s},"memory":{"total_mb":%s,"used_mb":%s,"available_mb":%s,"cached_mb":%s,"swap_total_mb":%s,"swap_used_mb":%s,"usage_pct":%s},"load":{"load1":%s,"load5":%s,"load15":%s},%s,"collector":{"cpu_pct":%s,"mem_mb":%s}}\n' \
     "$ts" "$cpu_u" "$cpu_s" "$cpu_id" "$cpu_w" "$cpu_st" "$cpu_pct" \
     "$mt" "$mu" "$ma" "$mc" "$stt" "$su" "$mp" \
     "$l1" "$l5" "$l15" \
-    "$pr" >> "$OUT"
+    "$pr" "$c_self_cpu" "$c_self_mem" >> "$OUT"
 
   sleep "$INTERVAL"
 done

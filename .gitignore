@@ -1,0 +1,8 @@
+node_modules/
+*.js.map
+coverage/
+.env
+*.tgz
+
+# Do NOT ignore dist/ — the action needs the built JS checked in
+# !dist/

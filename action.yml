@@ -1,0 +1,94 @@
+name: 'RunnerLens'
+description: >
+  Zero-config observability for GitHub Actions runners.
+  Monitor CPU, memory, disk I/O, and network usage with
+  sparkline charts in your Job Summary.
+author: 'RunnerLens'
+
+branding:
+  icon: 'activity'
+  color: 'blue'
+
+inputs:
+  api-key:
+    description: 'RunnerLens API key for the SaaS dashboard (optional)'
+    required: false
+    default: ''
+  api-endpoint:
+    description: 'RunnerLens API endpoint (override for self-hosted)'
+    required: false
+    default: 'https://api.runnerlens.com'
+  sample-interval:
+    description: 'Metric sampling interval in seconds (1–30)'
+    required: false
+    default: '3'
+  include-processes:
+    description: 'Capture top processes by CPU/memory'
+    required: false
+    default: 'true'
+  include-network:
+    description: 'Capture network I/O metrics'
+    required: false
+    default: 'true'
+  include-disk:
+    description: 'Capture disk I/O and space metrics'
+    required: false
+    default: 'true'
+  summary-style:
+    description: 'Report style in Job Summary: full | compact | minimal | none'
+    required: false
+    default: 'full'
+  max-file-size:
+    description: 'Maximum metrics file size in MB before rotation (0 = unlimited)'
+    required: false
+    default: '100'
+  threshold-cpu-warn:
+    description: 'CPU % warning threshold'
+    required: false
+    default: '80'
+  threshold-cpu-crit:
+    description: 'CPU % critical threshold'
+    required: false
+    default: '95'
+  threshold-mem-warn:
+    description: 'Memory % warning threshold'
+    required: false
+    default: '80'
+  threshold-mem-crit:
+    description: 'Memory % critical threshold'
+    required: false
+    default: '95'
+
+outputs:
+  cpu-avg:
+    description: 'Average CPU usage %'
+  cpu-max:
+    description: 'Peak CPU usage %'
+  cpu-p95:
+    description: '95th-percentile CPU usage %'
+  mem-avg-mb:
+    description: 'Average memory usage (MB)'
+  mem-max-mb:
+    description: 'Peak memory usage (MB)'
+  mem-avg-pct:
+    description: 'Average memory usage %'
+  disk-read-mb:
+    description: 'Total disk read (MB)'
+  disk-write-mb:
+    description: 'Total disk written (MB)'
+  net-rx-mb:
+    description: 'Total network received (MB)'
+  net-tx-mb:
+    description: 'Total network sent (MB)'
+  samples:
+    description: 'Number of samples collected'
+  duration-seconds:
+    description: 'Monitoring wall-clock duration'
+  report-json:
+    description: 'Full report as a JSON string'
+
+runs:
+  using: 'node20'
+  main: 'dist/main/index.js'
+  post: 'dist/post/index.js'
+  post-if: 'always()'

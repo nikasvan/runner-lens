@@ -120,18 +120,25 @@ export async function fetchStepsFromRuntime(): Promise<GitHubStep[]> {
   const token = process.env.ACTIONS_RUNTIME_TOKEN;
 
   if (!runtimeUrl || !token) {
-    core.debug('RunnerLens: ACTIONS_RUNTIME_URL/TOKEN not available');
+    core.info('RunnerLens: ACTIONS_RUNTIME_URL/TOKEN not available for step detection');
     return [];
   }
 
   const payload = decodeJwtPayload(token);
+  const claimKeys = Object.keys(payload);
+  core.info(`RunnerLens: runtime token claims: ${claimKeys.join(', ')}`);
 
   // The JWT may expose plan/timeline IDs under various claim names
   const planId = payload.PlanId ?? payload.planId ?? payload.plan_id;
   const timelineId = payload.TimeLineId ?? payload.timelineId ?? payload.timeline_id;
 
   if (!planId || !timelineId) {
-    core.debug('RunnerLens: PlanId/TimeLineId not found in runtime token');
+    core.info(`RunnerLens: PlanId/TimeLineId not in token — trying URL-based discovery`);
+
+    // Try extracting IDs from ACTIONS_RUNTIME_URL path segments
+    // Format may be: https://pipelines.actions.githubusercontent.com/{guid}/
+    // or contain plan info in query params
+    core.info(`RunnerLens: runtime URL pattern: ${runtimeUrl.replace(/[a-f0-9-]{36}/gi, '{GUID}')}`);
     return [];
   }
 

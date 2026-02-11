@@ -54,6 +54,10 @@ inputs:
     description: 'Memory % critical threshold'
     required: false
     default: '95'
+  upload-artifact:
+    description: 'Upload raw samples and report as a workflow artifact'
+    required: false
+    default: 'false'
 
 outputs:
   cpu-avg:

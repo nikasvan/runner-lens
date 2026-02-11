@@ -1,5 +1,7 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
+import * as path from 'path';
+import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
 import { processMetrics } from './reporter';
@@ -168,6 +170,29 @@ async function run(): Promise<void> {
     // ── API upload ────────────────────────────────────────
     if (config.apiKey) {
       await sendToApi(config, sysInfo, report, samples);
+    }
+
+    // ── Artifact upload ─────────────────────────────────
+    if (core.getInput('upload-artifact') === 'true') {
+      try {
+        const artifactDir = path.join(DATA_DIR, 'artifact');
+        fs.mkdirSync(artifactDir, { recursive: true });
+
+        const samplesFile = path.join(artifactDir, 'samples.json');
+        const reportFile  = path.join(artifactDir, 'report.json');
+        fs.writeFileSync(samplesFile, JSON.stringify(samples, null, 2));
+        fs.writeFileSync(reportFile,  JSON.stringify(report, null, 2));
+
+        const artifact = new DefaultArtifactClient();
+        await artifact.uploadArtifact(
+          'runner-lens-metrics',
+          [samplesFile, reportFile],
+          artifactDir,
+        );
+        core.info('RunnerLens: metrics uploaded as artifact "runner-lens-metrics"');
+      } catch (e) {
+        core.warning(`RunnerLens: artifact upload failed — ${e}`);
+      }
     }
 
     // ── Log alerts ────────────────────────────────────────

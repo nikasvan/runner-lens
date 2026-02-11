@@ -157,7 +157,7 @@ function markdown(
   // ── Per-step breakdown ───────────────────────────────────
   if (report.steps && report.steps.length > 0) {
     L.push('<details open><summary><strong>📋 Per-Step Breakdown</strong></summary>\n');
-    L.push('| # | Step | Duration | CPU avg | CPU peak | Mem avg | Mem peak |');
+    L.push('| # | Step | Duration | CPU avg | CPU peak | Sys Mem avg | Sys Mem peak |');
     L.push('|---:|---|---:|---:|---:|---:|---:|');
     for (const s of report.steps) {
       const memAvgGB = (s.mem_avg_mb / 1024).toFixed(1);

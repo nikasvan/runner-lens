@@ -1,8 +1,8 @@
 name: 'RunnerLens'
 description: >
   Zero-config observability for GitHub Actions runners.
-  Monitor CPU, memory, disk I/O, and network usage with
-  sparkline charts in your Job Summary.
+  Monitor CPU and memory usage with sparkline charts
+  in your Job Summary.
 author: 'RunnerLens'
 
 branding:
@@ -24,14 +24,6 @@ inputs:
     default: '3'
   include-processes:
     description: 'Capture top processes by CPU/memory'
-    required: false
-    default: 'true'
-  include-network:
-    description: 'Capture network I/O metrics'
-    required: false
-    default: 'true'
-  include-disk:
-    description: 'Capture disk I/O and space metrics'
     required: false
     default: 'true'
   summary-style:
@@ -72,14 +64,6 @@ outputs:
     description: 'Peak memory usage (MB)'
   mem-avg-pct:
     description: 'Average memory usage %'
-  disk-read-mb:
-    description: 'Total disk read (MB)'
-  disk-write-mb:
-    description: 'Total disk written (MB)'
-  net-rx-mb:
-    description: 'Total network received (MB)'
-  net-tx-mb:
-    description: 'Total network sent (MB)'
   samples:
     description: 'Number of samples collected'
   duration-seconds:

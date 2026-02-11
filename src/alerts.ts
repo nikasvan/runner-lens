@@ -76,17 +76,5 @@ export function evaluateAlerts(
     });
   }
 
-  // ── Disk space ──────────────────────────────────────────
-  const lastSample = samples[samples.length - 1];
-  for (const ds of lastSample?.disk_space ?? []) {
-    if (ds.usage_pct > 90) {
-      alerts.push({
-        level: 'warning', metric: 'Disk Space',
-        message: `${ds.mount} at ${ds.usage_pct}% — ${ds.available_mb} MB remaining`,
-        value: ds.usage_pct, threshold: 90,
-      });
-    }
-  }
-
   return alerts;
 }

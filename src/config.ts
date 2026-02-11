@@ -25,8 +25,6 @@ export function parseConfig(): MonitorConfig {
   return {
     sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),
     includeProcesses: core.getInput('include-processes') !== 'false',
-    includeNetwork: core.getInput('include-network') !== 'false',
-    includeDisk: core.getInput('include-disk') !== 'false',
     summaryStyle,
     maxSizeMb: Math.max(0, intInput('max-file-size', 100)),
     apiKey,

@@ -21,28 +21,6 @@ export interface MemorySample {
   usage_pct: number;
 }
 
-export interface DiskIoSample {
-  read_bytes: number;
-  write_bytes: number;
-  read_ops: number;
-  write_ops: number;
-}
-
-export interface DiskSpaceSample {
-  mount: string;
-  total_mb: number;
-  used_mb: number;
-  available_mb: number;
-  usage_pct: number;
-}
-
-export interface NetworkSample {
-  rx_bytes: number;
-  tx_bytes: number;
-  rx_packets: number;
-  tx_packets: number;
-}
-
 export interface ProcessInfo {
   pid: number;
   name: string;
@@ -60,9 +38,6 @@ export interface MetricSample {
   timestamp: number;
   cpu: CpuSample;
   memory: MemorySample;
-  disk_io: DiskIoSample;
-  disk_space: DiskSpaceSample[];
-  network: NetworkSample;
   load: LoadAverage;
   processes: ProcessInfo[];
 }
@@ -88,8 +63,6 @@ export interface ThresholdConfig {
 export interface MonitorConfig {
   sampleInterval: number;
   includeProcesses: boolean;
-  includeNetwork: boolean;
-  includeDisk: boolean;
   summaryStyle: 'full' | 'compact' | 'minimal' | 'none';
   maxSizeMb: number;
   apiKey: string;
@@ -126,21 +99,6 @@ export interface AggregatedReport {
   cpu: MetricStats;
   memory: MetricStats & { total_mb: number; swap_max_mb: number };
 
-  disk_io: {
-    total_read_mb: number;
-    total_write_mb: number;
-    avg_read_mbps: number;
-    avg_write_mbps: number;
-  };
-
-  network: {
-    total_rx_mb: number;
-    total_tx_mb: number;
-    avg_rx_mbps: number;
-    avg_tx_mbps: number;
-  };
-
-  disk_space: { mount: string; usage_pct: number; available_mb: number }[];
   load: { avg_1m: number; max_1m: number };
   top_processes: ProcessInfo[];
   alerts: Alert[];

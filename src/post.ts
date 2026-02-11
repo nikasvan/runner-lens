@@ -127,10 +127,6 @@ async function run(): Promise<void> {
     core.setOutput('mem-max-mb', report.memory.max.toFixed(0));
     core.setOutput('mem-avg-pct',
       safePct(report.memory.avg, report.memory.total_mb).toFixed(1));
-    core.setOutput('disk-read-mb', report.disk_io.total_read_mb.toFixed(1));
-    core.setOutput('disk-write-mb', report.disk_io.total_write_mb.toFixed(1));
-    core.setOutput('net-rx-mb', report.network.total_rx_mb.toFixed(1));
-    core.setOutput('net-tx-mb', report.network.total_tx_mb.toFixed(1));
     core.setOutput('samples', report.sample_count.toString());
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));

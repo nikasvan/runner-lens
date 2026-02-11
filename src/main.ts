@@ -43,8 +43,6 @@ async function run(): Promise<void> {
       cfg.sampleInterval.toString(),
     ];
     if (!cfg.includeProcesses) args.push('--no-processes');
-    if (!cfg.includeNetwork)   args.push('--no-network');
-    if (!cfg.includeDisk)      args.push('--no-disk');
     args.push(`--max-size=${cfg.maxSizeMb}`);
 
     // ── Spawn collector (detached, won't block the job) ───

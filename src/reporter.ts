@@ -5,7 +5,7 @@ import type {
 import { stats, safeMax, safePct } from './stats';
 import { evaluateAlerts } from './alerts';
 import { recommend } from './recommendations';
-import { sparkline, progressBar, statusDot, fmtBytes, fmtDuration } from './charts';
+import { sparkline, progressBar, statusDot, fmtDuration } from './charts';
 import { REPORT_VERSION } from './constants';
 
 // ─────────────────────────────────────────────────────────────
@@ -23,14 +23,6 @@ function aggregate(
   const memTotal = samples[0]?.memory.total_mb ?? 0;
   const swapMax  = safeMax(samples.map((s) => s.memory.swap_used_mb));
 
-  const totalDiskR  = samples.reduce((a, s) => a + (s.disk_io?.read_bytes  ?? 0), 0);
-  const totalDiskW  = samples.reduce((a, s) => a + (s.disk_io?.write_bytes ?? 0), 0);
-  const totalNetRx  = samples.reduce((a, s) => a + (s.network?.rx_bytes ?? 0), 0);
-  const totalNetTx  = samples.reduce((a, s) => a + (s.network?.tx_bytes ?? 0), 0);
-
-  const MB = 1024 * 1024;
-  const d  = durationSec || 1;
-
   const loadVals = samples.map((s) => s.load?.load1 ?? 0);
   const loadAvg  = loadVals.length > 0
     ? loadVals.reduce((a, b) => a + b, 0) / loadVals.length
@@ -46,10 +38,6 @@ function aggregate(
   const topProcs = [...procMap.values()].sort((a, b) => b.cpu_pct - a.cpu_pct).slice(0, 10);
 
   const last = samples[samples.length - 1];
-  const diskSpace = (last?.disk_space ?? []).map((ds) => ({
-    mount: ds.mount, usage_pct: ds.usage_pct, available_mb: ds.available_mb,
-  }));
-
   const alerts = evaluateAlerts(samples, config, cpuStats, memStats, memTotal);
 
   const report: AggregatedReport = {
@@ -61,19 +49,6 @@ function aggregate(
     ended_at:   new Date(last.timestamp * 1000).toISOString(),
     cpu: cpuStats,
     memory: { ...memStats, total_mb: memTotal, swap_max_mb: swapMax },
-    disk_io: {
-      total_read_mb:  totalDiskR / MB,
-      total_write_mb: totalDiskW / MB,
-      avg_read_mbps:  totalDiskR / MB / d,
-      avg_write_mbps: totalDiskW / MB / d,
-    },
-    network: {
-      total_rx_mb:  totalNetRx / MB,
-      total_tx_mb:  totalNetTx / MB,
-      avg_rx_mbps:  totalNetRx / MB / d,
-      avg_tx_mbps:  totalNetTx / MB / d,
-    },
-    disk_space: diskSpace,
     load: {
       avg_1m: loadAvg,
       max_1m: safeMax(loadVals),
@@ -110,8 +85,6 @@ function markdown(
   const cpuPeakPct = report.cpu.max;
   const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
   const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
-  const diskPct = report.disk_space[0]?.usage_pct ?? 0;
-  const diskFree = report.disk_space[0]?.available_mb ?? 0;
 
   // ── Header: status + runner summary on one line ────────
   L.push('## 📊 RunnerLens\n');
@@ -161,32 +134,6 @@ function markdown(
     `| ${memPeakPct.toFixed(0)}% ` +
     `| ${memUsedGB} / ${memTotalGB} GB |`,
   );
-
-  // Disk row
-  if (config.includeDisk) {
-    const diskRead = fmtBytes(report.disk_io.total_read_mb * 1024 * 1024);
-    const diskWrite = fmtBytes(report.disk_io.total_write_mb * 1024 * 1024);
-    L.push(
-      `| ${statusDot(diskPct, 80, 90)} ` +
-      `| **Disk** ` +
-      `| \`${progressBar(diskPct)}\` **${diskPct}%** used ` +
-      `| ${fmtBytes(diskFree * 1024 * 1024)} free ` +
-      `| ${diskRead} read · ${diskWrite} written |`,
-    );
-  }
-
-  // Network row
-  if (config.includeNetwork) {
-    const rxTotal = fmtBytes(report.network.total_rx_mb * 1024 * 1024);
-    const txTotal = fmtBytes(report.network.total_tx_mb * 1024 * 1024);
-    L.push(
-      `| 🟢 ` +
-      `| **Network** ` +
-      `| ${rxTotal} ↓ · ${txTotal} ↑ ` +
-      `| ` +
-      `| ${report.network.avg_rx_mbps.toFixed(1)} MB/s avg ↓ |`,
-    );
-  }
 
   L.push('');
 

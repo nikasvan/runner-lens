@@ -7,25 +7,20 @@
 #
 # Usage: collect.sh <output> <interval> [flags...]
 #   --no-processes  skip top-process capture
-#   --no-network    skip network I/O deltas
-#   --no-disk       skip disk I/O deltas + disk space
 #   --max-size=N    max output file size in MB (default: 100, 0=unlimited)
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
-readonly OUT="${1:?Usage: collect.sh <output> <interval> [--no-processes] [--no-network] [--no-disk] [--max-size=N]}"
+readonly OUT="${1:?Usage: collect.sh <output> <interval> [--no-processes] [--max-size=N]}"
 readonly INTERVAL="${2:-3}"
 shift 2 2>/dev/null || true
 
-readonly SECTOR_BYTES=512
 readonly DEFAULT_MAX_SIZE_MB=100
 
-OPT_PROC=1  OPT_NET=1  OPT_DISK=1  MAX_SIZE_MB="$DEFAULT_MAX_SIZE_MB"
+OPT_PROC=1  MAX_SIZE_MB="$DEFAULT_MAX_SIZE_MB"
 for a in "$@"; do
   case "$a" in
     --no-processes) OPT_PROC=0 ;;
-    --no-network)   OPT_NET=0 ;;
-    --no-disk)      OPT_DISK=0 ;;
     --max-size=*)   MAX_SIZE_MB="${a#--max-size=}" ;;
   esac
 done
@@ -43,8 +38,6 @@ trap 'exit 0' SIGTERM SIGINT
 
 # ── previous-sample state for delta calculations ───────────
 p_user=0 p_nice=0 p_sys=0 p_idle=0 p_iow=0 p_irq=0 p_sirq=0 p_steal=0
-p_dr=0 p_dw=0 p_dro=0 p_dwo=0
-p_nr=0 p_nt=0 p_nrp=0 p_ntp=0
 
 # ── helpers ────────────────────────────────────────────────
 
@@ -86,32 +79,7 @@ read_mem() {
   ' /proc/meminfo
 }
 
-read_disk_io() {
-  awk -v sb="$SECTOR_BYTES" '
-    $3 ~ /^(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+|xvd[a-z]+)$/ {
-      rb+=$6; wb+=$10; ro+=$4; wo+=$8
-    }
-    END { printf "%d %d %d %d", rb*sb, wb*sb, ro, wo }
-  ' /proc/diskstats
-}
-
-read_net() {
-  awk 'NR>2 && $1!~/lo:/ {
-    gsub(/:/, "", $1); r+=$2; t+=$10; rp+=$3; tp+=$11
-  }
-  END { printf "%d %d %d %d", r, t, rp, tp }' /proc/net/dev
-}
-
 read_load() { awk '{printf "%s %s %s",$1,$2,$3}' /proc/loadavg; }
-
-read_disk_space() {
-  df -BM --output=target,size,used,avail,pcent 2>/dev/null |
-    awk 'NR>1 && ($1=="/" || $1~/^\/home/ || $1~/^\/mnt/) {
-      gsub(/[M%]/, "", $0)
-      printf "%s{\"mount\":\"%s\",\"total_mb\":%s,\"used_mb\":%s,\"available_mb\":%s,\"usage_pct\":%s}",
-             (n++ ? "," : ""), $1, $2, $3, $4, $5
-    }'
-}
 
 read_procs() {
   ps -eo pid=,comm=,%cpu=,rss= --sort=-%cpu --no-headers 2>/dev/null |
@@ -144,8 +112,6 @@ maybe_rotate() {
 
 # ── seed previous counters (first read is discarded) ───────
 read -r p_user p_nice p_sys p_idle p_iow p_irq p_sirq p_steal <<< "$(read_cpu_raw)"
-(( OPT_DISK )) && read -r p_dr p_dw p_dro p_dwo <<< "$(read_disk_io)"
-(( OPT_NET  )) && read -r p_nr p_nt p_nrp p_ntp <<< "$(read_net)"
 
 sleep "$INTERVAL"
 
@@ -172,36 +138,6 @@ while true; do
   # ── Load ────────────────────────────────────────────────
   read -r l1 l5 l15 <<< "$(read_load)"
 
-  # ── Disk I/O (delta) ────────────────────────────────────
-  d_io='"disk_io":{"read_bytes":0,"write_bytes":0,"read_ops":0,"write_ops":0}'
-  if (( OPT_DISK )); then
-    read -r cdr cdw cdro cdwo <<< "$(read_disk_io)"
-    ddr=$(clamp0 $(( cdr - p_dr )))
-    ddw=$(clamp0 $(( cdw - p_dw )))
-    ddro=$(clamp0 $(( cdro - p_dro )))
-    ddwo=$(clamp0 $(( cdwo - p_dwo )))
-    d_io="\"disk_io\":{\"read_bytes\":${ddr},\"write_bytes\":${ddw},\"read_ops\":${ddro},\"write_ops\":${ddwo}}"
-    p_dr=$cdr p_dw=$cdw p_dro=$cdro p_dwo=$cdwo
-  fi
-
-  # ── Disk Space ──────────────────────────────────────────
-  d_sp='"disk_space":[]'
-  if (( OPT_DISK )); then
-    d_sp="\"disk_space\":[$(read_disk_space)]"
-  fi
-
-  # ── Network (delta) ─────────────────────────────────────
-  n_io='"network":{"rx_bytes":0,"tx_bytes":0,"rx_packets":0,"tx_packets":0}'
-  if (( OPT_NET )); then
-    read -r cnr cnt cnrp cntp <<< "$(read_net)"
-    dnr=$(clamp0 $(( cnr - p_nr )))
-    dnt=$(clamp0 $(( cnt - p_nt )))
-    dnrp=$(clamp0 $(( cnrp - p_nrp )))
-    dntp=$(clamp0 $(( cntp - p_ntp )))
-    n_io="\"network\":{\"rx_bytes\":${dnr},\"tx_bytes\":${dnt},\"rx_packets\":${dnrp},\"tx_packets\":${dntp}}"
-    p_nr=$cnr p_nt=$cnt p_nrp=$cnrp p_ntp=$cntp
-  fi
-
   # ── Processes ───────────────────────────────────────────
   pr='"processes":[]'
   if (( OPT_PROC )); then
@@ -211,10 +147,9 @@ while true; do
   # ── Rotate if needed, then emit JSONL line ──────────────
   maybe_rotate
 
-  printf '{"timestamp":%s,"cpu":{"user":%s,"system":%s,"idle":%s,"iowait":%s,"steal":%s,"usage":%s},"memory":{"total_mb":%s,"used_mb":%s,"available_mb":%s,"cached_mb":%s,"swap_total_mb":%s,"swap_used_mb":%s,"usage_pct":%s},%s,%s,%s,"load":{"load1":%s,"load5":%s,"load15":%s},%s}\n' \
+  printf '{"timestamp":%s,"cpu":{"user":%s,"system":%s,"idle":%s,"iowait":%s,"steal":%s,"usage":%s},"memory":{"total_mb":%s,"used_mb":%s,"available_mb":%s,"cached_mb":%s,"swap_total_mb":%s,"swap_used_mb":%s,"usage_pct":%s},"load":{"load1":%s,"load5":%s,"load15":%s},%s}\n' \
     "$ts" "$cpu_u" "$cpu_s" "$cpu_id" "$cpu_w" "$cpu_st" "$cpu_pct" \
     "$mt" "$mu" "$ma" "$mc" "$stt" "$su" "$mp" \
-    "$d_io" "$d_sp" "$n_io" \
     "$l1" "$l5" "$l15" \
     "$pr" >> "$OUT"
 

@@ -25,11 +25,6 @@ function makeSample(overrides: Partial<MetricSample> = {}): MetricSample {
       total_mb: 7168, used_mb: 3072, available_mb: 4096,
       cached_mb: 1024, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 42.9,
     },
-    disk_io: { read_bytes: 1048576, write_bytes: 524288, read_ops: 100, write_ops: 50 },
-    disk_space: [
-      { mount: '/', total_mb: 86016, used_mb: 24576, available_mb: 61440, usage_pct: 28 },
-    ],
-    network: { rx_bytes: 2097152, tx_bytes: 1048576, rx_packets: 1500, tx_packets: 800 },
     load: { load1: 1.5, load5: 1.2, load15: 0.9 },
     processes: [
       { pid: 100, name: 'node', cpu_pct: 35.0, mem_mb: 256 },
@@ -56,8 +51,6 @@ function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
   return {
     sampleInterval: 3,
     includeProcesses: true,
-    includeNetwork: true,
-    includeDisk: true,
     summaryStyle: 'full',
     maxSizeMb: 100,
     apiKey: '',
@@ -246,15 +239,6 @@ describe('evaluateAlerts', () => {
     expect(alerts.every((a) => !isNaN(a.value))).toBe(true);
   });
 
-  it('raises disk space warning for >90% usage', () => {
-    const sample = makeSample({
-      disk_space: [{ mount: '/', total_mb: 86016, used_mb: 82000, available_mb: 4016, usage_pct: 95 }],
-    });
-    const cpuStats = stats([sample.cpu.usage]);
-    const memStats = stats([sample.memory.used_mb]);
-    const alerts = evaluateAlerts([sample], makeConfig(), cpuStats, memStats, 7168);
-    expect(alerts.some((a) => a.metric === 'Disk Space')).toBe(true);
-  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -287,9 +271,7 @@ describe('recommend', () => {
       duration_seconds: 0, sample_count: 0,
       started_at: '', ended_at: '',
       cpu: stats([]), memory: { ...stats([]), total_mb: 0, swap_max_mb: 0 },
-      disk_io: { total_read_mb: 0, total_write_mb: 0, avg_read_mbps: 0, avg_write_mbps: 0 },
-      network: { total_rx_mb: 0, total_tx_mb: 0, avg_rx_mbps: 0, avg_tx_mbps: 0 },
-      disk_space: [], load: { avg_1m: 0, max_1m: 0 },
+      load: { avg_1m: 0, max_1m: 0 },
       top_processes: [], alerts: [], recommendations: [],
     }, [])).toEqual([]);
   });
@@ -325,8 +307,8 @@ describe('processMetrics', () => {
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
     const s = makeSample();
     const { report } = processMetrics([s], makeSysInfo(), makeConfig(), 0);
-    expect(Number.isFinite(report.disk_io.avg_read_mbps)).toBe(true);
-    expect(Number.isFinite(report.network.avg_rx_mbps)).toBe(true);
+    expect(Number.isFinite(report.cpu.avg)).toBe(true);
+    expect(Number.isFinite(report.memory.avg)).toBe(true);
   });
 
   it('produces no markdown when summaryStyle is none', () => {
@@ -335,13 +317,6 @@ describe('processMetrics', () => {
       [s, s], makeSysInfo(), makeConfig({ summaryStyle: 'none' }), 60,
     );
     expect(markdown).toBe('');
-  });
-
-  it('aggregates disk I/O totals correctly', () => {
-    const s = makeSample();
-    const { report } = processMetrics([s, s, s], makeSysInfo(), makeConfig(), 9);
-    const expectedMB = (3 * 1048576) / (1024 * 1024);
-    expect(report.disk_io.total_read_mb).toBeCloseTo(expectedMB, 4);
   });
 
   it('deduplicates top processes by name keeping highest CPU', () => {
@@ -404,14 +379,10 @@ describe('edge cases', () => {
       timestamp: 1700000000,
       cpu: { user: 10, system: 5, idle: 85, iowait: 0, steal: 0, usage: 15 },
       memory: { total_mb: 4096, used_mb: 1024, available_mb: 3072, cached_mb: 512, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 25 },
-      disk_io: { read_bytes: 0, write_bytes: 0, read_ops: 0, write_ops: 0 },
-      disk_space: [],
-      network: { rx_bytes: 0, tx_bytes: 0, rx_packets: 0, tx_packets: 0 },
       load: { load1: 0, load5: 0, load15: 0 },
       processes: [],
     };
     const { report } = processMetrics([sparse], makeSysInfo(), makeConfig(), 3);
     expect(report.top_processes).toEqual([]);
-    expect(report.disk_space).toEqual([]);
   });
 });

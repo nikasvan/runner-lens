@@ -44,8 +44,9 @@ p_self_ticks=0
 readonly CLK_TCK=$(getconf CLK_TCK 2>/dev/null || echo 100)
 
 read_self_cpu_ticks() {
-  # /proc/self/stat fields 14=utime 15=stime (1-indexed)
-  awk '{print $14+$15}' /proc/self/stat 2>/dev/null || echo 0
+  # /proc/self/stat: 14=utime 15=stime 16=cutime 17=cstime
+  # Include child process time (awk, ps, date) for true overhead
+  awk '{print $14+$15+$16+$17}' /proc/self/stat 2>/dev/null || echo 0
 }
 
 read_self_mem_mb() {

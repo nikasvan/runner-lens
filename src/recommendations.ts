@@ -16,9 +16,9 @@ export function recommend(report: AggregatedReport, samples: MetricSample[]): st
   }
 
   // ── Under-sized runner ──────────────────────────────────
-  if (cpu.p95 > 90 && system.cpu_count <= 2) {
+  if (cpu.avg > 80 && system.cpu_count <= 2) {
     r.push(
-      '⚡ **CPU saturated** — p95 >90 % on a 2-core runner. ' +
+      '⚡ **CPU saturated** — average >80 % on a 2-core runner. ' +
       'Upgrade to `ubuntu-latest-4-cores` or larger.',
     );
   }

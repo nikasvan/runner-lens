@@ -205,7 +205,7 @@ describe('evaluateAlerts', () => {
     expect(alerts).toEqual([]);
   });
 
-  it('raises critical CPU alert when p95 exceeds critical threshold', () => {
+  it('raises critical CPU alert when average exceeds critical threshold', () => {
     const sample = makeSample({ cpu: { user: 90, system: 5, idle: 3, iowait: 1, steal: 1, usage: 97 } });
     const samples = Array(20).fill(sample);
     const cpuStats = stats(samples.map((s) => s.cpu.usage));

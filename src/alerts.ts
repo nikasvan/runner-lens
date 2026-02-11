@@ -14,33 +14,33 @@ export function evaluateAlerts(
   if (samples.length === 0) return alerts;
 
   // ── CPU ─────────────────────────────────────────────────
-  if (cpuStats.p95 >= t.cpu_crit) {
+  if (cpuStats.avg >= t.cpu_crit) {
     alerts.push({
       level: 'critical', metric: 'CPU',
-      message: `p95 CPU at ${cpuStats.p95.toFixed(1)}% exceeds critical threshold ${t.cpu_crit}%`,
-      value: cpuStats.p95, threshold: t.cpu_crit,
+      message: `Average CPU at ${cpuStats.avg.toFixed(1)}% exceeds critical threshold ${t.cpu_crit}%`,
+      value: cpuStats.avg, threshold: t.cpu_crit,
     });
-  } else if (cpuStats.p95 >= t.cpu_warn) {
+  } else if (cpuStats.avg >= t.cpu_warn) {
     alerts.push({
       level: 'warning', metric: 'CPU',
-      message: `p95 CPU at ${cpuStats.p95.toFixed(1)}% exceeds warning threshold ${t.cpu_warn}%`,
-      value: cpuStats.p95, threshold: t.cpu_warn,
+      message: `Average CPU at ${cpuStats.avg.toFixed(1)}% exceeds warning threshold ${t.cpu_warn}%`,
+      value: cpuStats.avg, threshold: t.cpu_warn,
     });
   }
 
   // ── Memory ──────────────────────────────────────────────
-  const memP95Pct = safePct(memStats.p95, memTotalMb);
-  if (memP95Pct >= t.mem_crit) {
+  const memAvgPct = safePct(memStats.avg, memTotalMb);
+  if (memAvgPct >= t.mem_crit) {
     alerts.push({
       level: 'critical', metric: 'Memory',
-      message: `p95 memory at ${memP95Pct.toFixed(1)}% (${memStats.p95.toFixed(0)}/${memTotalMb} MB)`,
-      value: memP95Pct, threshold: t.mem_crit,
+      message: `Average memory at ${memAvgPct.toFixed(1)}% (${memStats.avg.toFixed(0)}/${memTotalMb} MB)`,
+      value: memAvgPct, threshold: t.mem_crit,
     });
-  } else if (memP95Pct >= t.mem_warn) {
+  } else if (memAvgPct >= t.mem_warn) {
     alerts.push({
       level: 'warning', metric: 'Memory',
-      message: `p95 memory at ${memP95Pct.toFixed(1)}% (${memStats.p95.toFixed(0)}/${memTotalMb} MB)`,
-      value: memP95Pct, threshold: t.mem_warn,
+      message: `Average memory at ${memAvgPct.toFixed(1)}% (${memStats.avg.toFixed(0)}/${memTotalMb} MB)`,
+      value: memAvgPct, threshold: t.mem_warn,
     });
   }
 

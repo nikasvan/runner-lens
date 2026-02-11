@@ -70,7 +70,7 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
   });
 
   if (res.status !== 200) {
-    core.info(`RunnerLens: GitHub API returned ${res.status} — per-step breakdown needs actions:read permission`);
+    core.info(`RunnerLens: GitHub API returned ${res.status} — add "permissions: actions: read" to your job for per-step breakdown`);
     return [];
   }
 
@@ -130,7 +130,7 @@ export async function fetchStepsFromRuntime(): Promise<GitHubStep[]> {
   const jobId  = payload.job_id;
 
   if (!planId) {
-    core.info('RunnerLens: plan_id not found in runtime token');
+    core.debug('RunnerLens: plan_id not found in runtime token');
     return [];
   }
 
@@ -139,7 +139,6 @@ export async function fetchStepsFromRuntime(): Promise<GitHubStep[]> {
   const planBase = `${base}/_apis/distributedtask/hubs/Actions/plans/${planId}`;
 
   // Try multiple endpoint patterns — GitHub's internal API isn't documented.
-  // 1) timeline/{orchId}  2) timeline/{jobId}  3) timeline (no ID)
   const candidates = [
     ...(orchId ? [`${planBase}/timelines/${orchId}`] : []),
     ...(jobId  ? [`${planBase}/timelines/${jobId}`]  : []),
@@ -157,13 +156,9 @@ export async function fetchStepsFromRuntime(): Promise<GitHubStep[]> {
         break;
       }
     }
-    core.info(`RunnerLens: tried ${url.replace(base, '...')} → ${res.status}`);
   }
 
-  if (records.length === 0) {
-    core.info(`RunnerLens: no timeline records found (plan_id=${planId}, orch_id=${orchId ?? 'n/a'}, job_id=${jobId ?? 'n/a'})`);
-    return [];
-  }
+  if (records.length === 0) return [];
 
   // "Task" records are workflow steps; sort by execution order
   return records

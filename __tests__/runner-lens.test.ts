@@ -426,7 +426,7 @@ describe('collector stats', () => {
   it('shows collector info in footer', () => {
     const s = makeSample({ collector: { cpu_pct: 0.5, mem_mb: 3.2 } });
     const { markdown } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
-    expect(markdown).toContain('Collector:');
+    expect(markdown).toContain('Sampling:');
     expect(markdown).toContain('0.5% CPU');
   });
 });

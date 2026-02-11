@@ -88,7 +88,6 @@ function loadSystemInfo(): SystemInfo {
 
 async function run(): Promise<void> {
   const cpuStart = process.cpuUsage();
-  const wallStart = Date.now();
 
   try {
     if (core.getState(STATE.ACTIVE) !== 'true') {
@@ -128,21 +127,26 @@ async function run(): Promise<void> {
         if (rawSteps.length > 0) {
           steps = correlateSteps(rawSteps, samples);
           core.info(`RunnerLens: correlated ${steps.length} steps`);
+        } else {
+          core.info('RunnerLens: step fetch returned 0 steps — check that the token has actions:read permission');
         }
       } catch (e) {
-        core.debug(`RunnerLens: step fetch failed — ${e}`);
+        core.warning(`RunnerLens: step fetch failed — ${e}`);
       }
+    } else {
+      core.info('RunnerLens: no github-token — skipping per-step breakdown');
     }
 
     // ── Process ───────────────────────────────────────────
     const { report, markdown } = processMetrics(samples, sysInfo, config, dur, steps);
 
     // ── Reporter self-monitoring ──────────────────────────
+    // Use total job duration as denominator so the % is directly
+    // comparable to the sampling overhead (both = fraction of one
+    // core over the entire job).
     const cpuDelta = process.cpuUsage(cpuStart);
-    const wallSec = (Date.now() - wallStart) / 1000;
-    const reporterCpuPct = wallSec > 0
-      ? ((cpuDelta.user + cpuDelta.system) / 1e6) / wallSec * 100
-      : 0;
+    const cpuSec = (cpuDelta.user + cpuDelta.system) / 1e6;
+    const reporterCpuPct = dur > 0 ? (cpuSec / dur) * 100 : 0;
     const reporterMemMb = process.memoryUsage().rss / (1024 * 1024);
     report.reporter = { cpu_pct: reporterCpuPct, mem_mb: reporterMemMb };
 
@@ -160,7 +164,7 @@ async function run(): Promise<void> {
 
     // ── Job Summary ───────────────────────────────────────
     if (markdown) {
-      const reporterInfo = ` · Reporter: ${reporterCpuPct.toFixed(1)}% CPU · ${reporterMemMb.toFixed(1)} MB RAM`;
+      const reporterInfo = ` · Reporting: ${reporterCpuPct.toFixed(1)}% CPU · ${reporterMemMb.toFixed(1)} MB RAM`;
       await core.summary.addRaw(markdown.replace('</sub>', `${reporterInfo}</sub>`)).write();
       core.info('RunnerLens: report written to Job Summary');
     }

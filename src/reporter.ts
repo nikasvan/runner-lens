@@ -228,7 +228,7 @@ function markdown(
   // ── Footer ─────────────────────────────────────────────
   L.push('---');
   const collectorInfo = report.collector
-    ? ` · Collector: ${report.collector.avg_cpu_pct.toFixed(1)}% CPU · ${report.collector.avg_mem_mb.toFixed(1)} MB RAM`
+    ? ` · Sampling: ${report.collector.avg_cpu_pct.toFixed(1)}% CPU · ${report.collector.avg_mem_mb.toFixed(1)} MB RAM`
     : '';
   L.push(
     `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +

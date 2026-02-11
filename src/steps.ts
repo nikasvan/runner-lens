@@ -58,7 +58,7 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
   const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
 
   if (!repo || !runId || !job) {
-    core.debug('RunnerLens: missing GITHUB env vars for step detection');
+    core.info('RunnerLens: missing GITHUB env vars for step detection');
     return [];
   }
 
@@ -70,7 +70,7 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
   });
 
   if (res.status !== 200) {
-    core.debug(`RunnerLens: GitHub API returned ${res.status}`);
+    core.info(`RunnerLens: GitHub API returned ${res.status} — per-step breakdown needs actions:read permission`);
     return [];
   }
 
@@ -83,7 +83,7 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
     jobs.find((j) => j.name === job) ??
     jobs.find((j) => j.status === 'in_progress');
   if (!current) {
-    core.debug(`RunnerLens: could not find job "${job}" in API response`);
+    core.info(`RunnerLens: could not match job "${job}" — found: ${jobs.map((j) => j.name).join(', ')}`);
     return [];
   }
 

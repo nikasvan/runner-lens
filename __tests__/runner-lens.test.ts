@@ -7,7 +7,7 @@ import { sparkline, intensityBar, fmtBytes, fmtDuration, progressBar, statusDot 
 import { evaluateAlerts } from '../src/alerts';
 import { recommend } from '../src/recommendations';
 import { processMetrics } from '../src/reporter';
-import { correlateSteps } from '../src/steps';
+import { correlateSteps, fetchSteps, fetchStepsFromRuntime } from '../src/steps';
 import type {
   MetricSample, SystemInfo, MonitorConfig, StepMetrics,
 } from '../src/types';
@@ -453,6 +453,56 @@ describe('per-step markdown', () => {
     const s = makeSample();
     const { markdown } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
     expect(markdown).not.toContain('Per-Step Breakdown');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// fetchStepsFromRuntime
+// ─────────────────────────────────────────────────────────────
+
+describe('fetchSteps (GitHub API)', () => {
+  const origEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...origEnv };
+  });
+
+  it('returns empty when GITHUB env vars are missing', async () => {
+    delete process.env.GITHUB_REPOSITORY;
+    delete process.env.GITHUB_RUN_ID;
+    delete process.env.GITHUB_JOB;
+    const result = await fetchSteps('fake-token');
+    expect(result).toEqual([]);
+  });
+});
+
+describe('fetchStepsFromRuntime', () => {
+  const origEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...origEnv };
+  });
+
+  it('returns empty when ACTIONS_RUNTIME_URL is missing', async () => {
+    delete process.env.ACTIONS_RUNTIME_URL;
+    delete process.env.ACTIONS_RUNTIME_TOKEN;
+    const result = await fetchStepsFromRuntime();
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty when token has no PlanId/TimeLineId', async () => {
+    const payload = Buffer.from(JSON.stringify({ sub: 'test' })).toString('base64url');
+    process.env.ACTIONS_RUNTIME_URL = 'https://example.com/';
+    process.env.ACTIONS_RUNTIME_TOKEN = `header.${payload}.signature`;
+    const result = await fetchStepsFromRuntime();
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty when token is malformed', async () => {
+    process.env.ACTIONS_RUNTIME_URL = 'https://example.com/';
+    process.env.ACTIONS_RUNTIME_TOKEN = 'not-a-jwt';
+    const result = await fetchStepsFromRuntime();
+    expect(result).toEqual([]);
   });
 });
 

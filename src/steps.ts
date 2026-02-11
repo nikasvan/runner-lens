@@ -91,6 +91,79 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Fetch steps from the Actions Runtime internal timeline API
+// (works without actions:read — uses ACTIONS_RUNTIME_TOKEN)
+// ─────────────────────────────────────────────────────────────
+
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return {};
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+interface TimelineRecord {
+  type: string;
+  name: string;
+  order: number;
+  startTime: string | null;
+  finishTime: string | null;
+  state: string;
+}
+
+export async function fetchStepsFromRuntime(): Promise<GitHubStep[]> {
+  const runtimeUrl = process.env.ACTIONS_RUNTIME_URL;
+  const token = process.env.ACTIONS_RUNTIME_TOKEN;
+
+  if (!runtimeUrl || !token) {
+    core.debug('RunnerLens: ACTIONS_RUNTIME_URL/TOKEN not available');
+    return [];
+  }
+
+  const payload = decodeJwtPayload(token);
+
+  // The JWT may expose plan/timeline IDs under various claim names
+  const planId = payload.PlanId ?? payload.planId ?? payload.plan_id;
+  const timelineId = payload.TimeLineId ?? payload.timelineId ?? payload.timeline_id;
+
+  if (!planId || !timelineId) {
+    core.debug('RunnerLens: PlanId/TimeLineId not found in runtime token');
+    return [];
+  }
+
+  const base = runtimeUrl.replace(/\/+$/, '');
+  const url = `${base}/_apis/distributedtask/hubs/Actions/plans/${planId}/timeline/${timelineId}`;
+
+  const res = await httpGet(url, {
+    Authorization: `Bearer ${token}`,
+  });
+
+  if (res.status !== 200) {
+    core.debug(`RunnerLens: timeline API returned ${res.status}`);
+    return [];
+  }
+
+  const data = JSON.parse(res.body);
+  const records: TimelineRecord[] = data.records ?? data.value ?? [];
+
+  // "Task" records are workflow steps; sort by execution order
+  return records
+    .filter((r) => r.type === 'Task' && r.startTime)
+    .sort((a, b) => a.order - b.order)
+    .map((r) => ({
+      name: r.name,
+      number: r.order,
+      status: r.state,
+      started_at: r.startTime,
+      completed_at: r.finishTime,
+    }));
+}
+
+// ─────────────────────────────────────────────────────────────
 // Correlate steps with samples
 // ─────────────────────────────────────────────────────────────
 

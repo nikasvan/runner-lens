@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import * as https from 'https';
 import type { MetricSample, StepMetrics } from './types';
+import { safeMax } from './stats';
 
 // ─────────────────────────────────────────────────────────────
 // Types for GitHub API response
@@ -137,9 +138,9 @@ export function correlateSteps(
         number: step.number,
         duration_seconds: duration,
         cpu_avg: cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length,
-        cpu_max: Math.max(...cpuVals),
+        cpu_max: safeMax(cpuVals),
         mem_avg_mb: memVals.reduce((a, b) => a + b, 0) / memVals.length,
-        mem_max_mb: Math.max(...memVals),
+        mem_max_mb: safeMax(memVals),
         sample_count: window.length,
       };
     });

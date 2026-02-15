@@ -111,8 +111,6 @@ read_procs() {
       }'
 }
 
-clamp0() { (( $1 < 0 )) && echo 0 || echo "$1"; }
-
 maybe_rotate() {
   (( MAX_SIZE_MB == 0 )) && return
   if [[ -f "$OUT" ]]; then

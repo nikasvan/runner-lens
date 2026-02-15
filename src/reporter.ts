@@ -8,10 +8,6 @@ import { recommend } from './recommendations';
 import { sparkline, progressBar, statusDot, fmtDuration } from './charts';
 import { REPORT_VERSION } from './constants';
 
-// ─────────────────────────────────────────────────────────────
-// Aggregation (unchanged)
-// ─────────────────────────────────────────────────────────────
-
 function aggregate(
   samples: MetricSample[],
   sysInfo: SystemInfo,

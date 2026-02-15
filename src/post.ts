@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
@@ -11,7 +12,6 @@ import { fetchSteps, correlateSteps } from './steps';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
 } from './constants';
-import * as os from 'os';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -169,7 +169,7 @@ async function run(): Promise<void> {
 
     // ── API upload ────────────────────────────────────────
     if (config.apiKey) {
-      await sendToApi(config, sysInfo, report, samples);
+      await sendToApi(config, report, samples);
     }
 
     // ── Artifact upload ─────────────────────────────────

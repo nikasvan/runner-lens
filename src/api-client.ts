@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as https from 'https';
 import * as zlib from 'zlib';
-import type { MonitorConfig, SystemInfo, AggregatedReport, MetricSample, IngestPayload } from './types';
+import type { MonitorConfig, AggregatedReport, MetricSample, IngestPayload } from './types';
 import { REPORT_VERSION } from './constants';
 
 const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB hard limit
@@ -70,7 +70,6 @@ function buildPayload(
 
 export async function sendToApi(
   config: MonitorConfig,
-  _sysInfo: SystemInfo,
   report: AggregatedReport,
   samples: MetricSample[],
 ): Promise<void> {

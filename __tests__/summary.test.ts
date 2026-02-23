@@ -128,55 +128,19 @@ describe('generateWorkflowCharts (quickchart fallback)', () => {
 // workflowMarkdown — SVG mode (with chart URLs)
 // ─────────────────────────────────────────────────────────────
 
-describe('workflowMarkdown with SVG URLs (primary)', () => {
-  it('renders img tags for uploaded SVGs including stat-cards', () => {
-    const md = workflowMarkdown(
-      [makeJob('build'), makeJob('test')],
-      makeConfig(),
-      {
-        'stat-cards': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/stat-cards.svg',
-        'cpu-timeline': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/cpu-timeline.svg',
-        'mem-timeline': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/mem-timeline.svg',
-      },
-    );
-    expect(md).toContain('Workflow Summary');
-    expect(md).toContain('<img');
-    expect(md).toContain('stat-cards.svg');
-    expect(md).toContain('cpu-timeline.svg');
-    expect(md).toContain('mem-timeline.svg');
-  });
+// ─────────────────────────────────────────────────────────────
+// workflowMarkdown — always renders HTML tables
+// ─────────────────────────────────────────────────────────────
 
-  it('falls back to HTML stat cards when only chart URLs exist (no stat-cards URL)', () => {
-    const md = workflowMarkdown(
-      [makeJob('build'), makeJob('test')],
-      makeConfig(),
-      {
-        'cpu-timeline': 'https://quickchart.io/chart?c=test-cpu',
-      },
-    );
+describe('workflowMarkdown', () => {
+  it('always renders HTML tables (no img tags)', () => {
+    const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
     expect(md).toContain('<table');
     expect(md).toContain('AMD EPYC');
-    expect(md).toContain('<img');
-    expect(md).toContain('test-cpu');
+    expect(md).not.toContain('<img');
   });
 
-  it('includes waterfall img when URL provided', () => {
-    const md = workflowMarkdown(
-      [makeJob('build')],
-      makeConfig(),
-      { 'waterfall': 'https://example.com/waterfall.svg' },
-    );
-    expect(md).toContain('Execution Timeline');
-    expect(md).toContain('waterfall.svg');
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// workflowMarkdown — fallback mode (HTML tables)
-// ─────────────────────────────────────────────────────────────
-
-describe('workflowMarkdown fallback', () => {
   it('renders header and runner info in stat cards', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');

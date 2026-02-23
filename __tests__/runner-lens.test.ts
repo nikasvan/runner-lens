@@ -136,10 +136,10 @@ describe('fmtDuration', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('processMetrics', () => {
-  it('produces a complete report with SVG charts and quickchart URLs', () => {
+  it('produces a complete report with SVG charts', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
-    const { report, charts, chartUrls } = processMetrics(
+    const { report, charts } = processMetrics(
       [s1, s2], makeSysInfo(), makeConfig(), 6,
     );
 
@@ -154,33 +154,17 @@ describe('processMetrics', () => {
     expect(charts['stat-cards']).toBeDefined();
     expect(charts['stat-cards']).toContain('<svg');
     expect(charts['stat-cards']).toContain('AMD EPYC');
-
-    // Quickchart fallback URLs
-    expect(typeof chartUrls).toBe('object');
   });
 
-  it('renders img tags when chart URLs provided', () => {
-    const s1 = makeSample({ timestamp: 1700000000 });
-    const s2 = makeSample({ timestamp: 1700000003 });
-    const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
-
-    const md = buildJobMarkdown(report, [s1, s2], makeConfig(), {
-      'stat-cards': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/stat-cards.svg',
-      'timeline': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/timeline.svg',
-    });
-    expect(md).toContain('RunnerLens');
-    expect(md).toContain('<img');
-    expect(md).toContain('stat-cards.svg');
-  });
-
-  it('falls back to HTML tables when no chart URLs', () => {
+  it('always renders HTML tables (no img tags)', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
 
     const md = buildJobMarkdown(report, [s1, s2], makeConfig());
     expect(md).toContain('RunnerLens');
-    expect(md).toContain('<table'); // HTML stat cards fallback
+    expect(md).toContain('<table');
+    expect(md).not.toContain('<img');
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
@@ -192,11 +176,10 @@ describe('processMetrics', () => {
 
   it('produces no charts when summaryStyle is none', () => {
     const s = makeSample();
-    const { charts, chartUrls } = processMetrics(
+    const { charts } = processMetrics(
       [s, s], makeSysInfo(), makeConfig({ summaryStyle: 'none' }), 60,
     );
     expect(Object.keys(charts)).toHaveLength(0);
-    expect(Object.keys(chartUrls)).toHaveLength(0);
   });
 
   it('produces no markdown when summaryStyle is none', () => {
@@ -239,10 +222,6 @@ describe('processMetrics', () => {
     expect(full.charts['timeline']).toBeDefined();
     expect(full.charts['timeline']).toContain('<svg');
     expect(minimal.charts['timeline']).toBeUndefined();
-    // quickchart fallback URLs
-    expect(full.chartUrls['timeline']).toBeDefined();
-    expect(full.chartUrls['timeline']).toContain('quickchart.io');
-    expect(minimal.chartUrls['timeline']).toBeUndefined();
   });
 
   it('includes timeline with correct length for multiple samples', () => {
@@ -377,11 +356,9 @@ describe('per-step markdown', () => {
       { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
       { name: 'Build', number: 2, duration_seconds: 120, cpu_avg: 67, cpu_max: 95, mem_avg_mb: 2300, mem_max_mb: 3100, sample_count: 40 },
     ];
-    const { charts, chartUrls } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    const { charts } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
     expect(charts['step-chart']).toBeDefined();
     expect(charts['step-chart']).toContain('<svg');
-    expect(chartUrls['step-chart']).toBeDefined();
-    expect(chartUrls['step-chart']).toContain('quickchart.io');
   });
 
   it('omits per-step table when no steps', () => {

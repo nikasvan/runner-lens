@@ -211,57 +211,10 @@ export function generateWorkflowCharts(jobs: JobReport[]): Record<string, string
 }
 
 // ─────────────────────────────────────────────────────────────
-// Build workflow markdown with image URLs
+// Build workflow markdown with HTML tables
 // ─────────────────────────────────────────────────────────────
 
-function workflowMarkdownWithImages(
-  jobs: JobReport[],
-  chartUrls: Record<string, string>,
-): string {
-  const L: string[] = [];
-  const a = aggregateStats(jobs);
-
-  L.push('## 📊 RunnerLens — Workflow Summary\n');
-
-  // Stat cards — use SVG image if uploaded, otherwise HTML table
-  if (chartUrls['stat-cards']) {
-    L.push(`<img src="${chartUrls['stat-cards']}" alt="Workflow stats" width="600">\n`);
-  } else {
-    L.push(htmlStatCards([
-      { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}`, color: '#39d2c0' },
-      { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel, color: '#3fb950' },
-      { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%`, color: '#58a6ff' },
-      { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB`, color: '#bc8cff' },
-    ]) + '\n');
-  }
-
-  if (chartUrls['cpu-timeline']) {
-    L.push(`<img src="${chartUrls['cpu-timeline']}" alt="CPU Timeline" width="600">\n`);
-  }
-
-  if (chartUrls['mem-timeline']) {
-    L.push(`<img src="${chartUrls['mem-timeline']}" alt="Memory Timeline" width="600">\n`);
-  }
-
-  if (chartUrls['waterfall']) {
-    L.push('### Execution Timeline\n');
-    L.push(`<img src="${chartUrls['waterfall']}" alt="Execution Timeline" width="600">\n`);
-  }
-
-  L.push('---');
-  L.push(
-    `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +
-    `v${REPORT_VERSION} — Workflow Summary</sub>`,
-  );
-
-  return L.join('\n');
-}
-
-// ─────────────────────────────────────────────────────────────
-// Fallback: HTML tables + Unicode sparklines
-// ─────────────────────────────────────────────────────────────
-
-function workflowMarkdownFallback(jobs: JobReport[]): string {
+function workflowMarkdownHtml(jobs: JobReport[]): string {
   const L: string[] = [];
   const a = aggregateStats(jobs);
 
@@ -333,19 +286,15 @@ function workflowMarkdownFallback(jobs: JobReport[]): string {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Build workflow-level markdown.
- * When chartUrls are provided (SVGs uploaded), uses <img> tags.
- * Otherwise falls back to HTML tables with Unicode sparklines.
+ * Build workflow-level markdown using HTML tables.
+ * GitHub strips SVG features so we always render bgcolor-based
+ * HTML tables that display reliably in Job Summary.
  */
 export function workflowMarkdown(
   jobs: JobReport[],
   _config?: MonitorConfig,
-  chartUrls?: Record<string, string>,
 ): string {
-  if (chartUrls && Object.keys(chartUrls).length > 0) {
-    return workflowMarkdownWithImages(jobs, chartUrls);
-  }
-  return workflowMarkdownFallback(jobs);
+  return workflowMarkdownHtml(jobs);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -367,16 +316,14 @@ export async function runSummary(config: MonitorConfig): Promise<void> {
 
   core.info(`RunnerLens: found ${jobs.length} job report(s): ${jobs.map((j) => j.jobName).join(', ')}`);
 
-  // Generate SVG charts and try to upload (primary)
+  // Upload SVG charts (for external reference / artifacts)
   const svgs = generateWorkflowSvgs(jobs);
-  let chartUrls: Record<string, string> = {};
   if (config.githubToken && Object.keys(svgs).length > 0) {
-    chartUrls = await uploadChartSvgs(svgs, config.githubToken);
+    await uploadChartSvgs(svgs, config.githubToken);
   }
-  // When SVG upload is unavailable, chartUrls stays empty and
-  // workflowMarkdown renders styled HTML tables instead.
-
-  const md = workflowMarkdown(jobs, config, chartUrls);
+  // Always use HTML tables for Job Summary — GitHub strips SVG
+  // features making <img> tags unreliable.
+  const md = workflowMarkdown(jobs, config);
   await core.summary.addRaw(md).write();
   core.info('RunnerLens: workflow summary written to Job Summary');
 

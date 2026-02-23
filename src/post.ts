@@ -145,7 +145,7 @@ async function run(): Promise<void> {
     }
 
     // ── Process ───────────────────────────────────────────
-    const { report, charts, chartUrls } = processMetrics(samples, sysInfo, config, dur, steps);
+    const { report, charts } = processMetrics(samples, sysInfo, config, dur, steps);
 
     // ── Reporter self-monitoring ──────────────────────────
     // Use total job duration as denominator so the % is directly
@@ -169,14 +169,13 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Upload SVG charts → fall back to inline HTML charts ──
-    let urls: Record<string, string> = {};
+    // ── Upload SVG charts (for external reference / artifacts) ──
     if (config.githubToken && Object.keys(charts).length > 0) {
-      urls = await uploadChartSvgs(charts, config.githubToken);
+      await uploadChartSvgs(charts, config.githubToken);
     }
-    // When SVG upload is unavailable, urls stays empty and
-    // buildJobMarkdown renders styled HTML tables instead.
-    const markdown = buildJobMarkdown(report, samples, config, urls);
+    // Always use HTML tables for Job Summary — GitHub strips SVG
+    // features (<style>, <path>, etc.) making <img> tags unreliable.
+    const markdown = buildJobMarkdown(report, samples, config);
 
     if (markdown) {
       await core.summary.addRaw(markdown).write();

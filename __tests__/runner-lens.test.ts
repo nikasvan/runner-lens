@@ -157,7 +157,7 @@ describe('processMetrics', () => {
     expect(decoded).toContain('AMD EPYC');
   });
 
-  it('renders inline SVG charts in job markdown', () => {
+  it('renders quickchart image URLs in job markdown', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
@@ -165,6 +165,7 @@ describe('processMetrics', () => {
     const md = buildJobMarkdown(report, [s1, s2], makeConfig());
     expect(md).toContain('RunnerLens');
     expect(md).toContain('<img ');
+    expect(md).toContain('quickchart.io');
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {

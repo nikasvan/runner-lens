@@ -7,6 +7,9 @@ import { fmtDuration } from './charts';
 import {
   svgImg, statCards, timelineChart, stepBarChart,
 } from './svg-charts';
+import {
+  statCardChartUrl, timelineChartUrl, barChartUrl,
+} from './quickchart';
 import { REPORT_VERSION } from './constants';
 
 const TIMELINE_POINTS = 80;
@@ -144,6 +147,66 @@ function generateSvgCharts(
 }
 
 // ─────────────────────────────────────────────────────────────
+// Generate quickchart.io image URLs for GitHub Job Summary
+// GitHub strips both inline <svg> and data: URIs; only https://
+// image URLs are allowed. quickchart.io renders Chart.js configs
+// as PNG images on-the-fly via GET URLs — no API key required.
+// ─────────────────────────────────────────────────────────────
+
+function generateQuickchartImgs(
+  report: AggregatedReport,
+  samples: MetricSample[],
+  config: MonitorConfig,
+): Record<string, string> {
+  const imgs: Record<string, string> = {};
+  const minimal = config.summaryStyle === 'minimal';
+  const sys = report.system;
+
+  const cpuAvgPct = report.cpu.avg;
+  const cpuPeakPct = report.cpu.max;
+  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
+  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
+
+  // Stat cards
+  const statUrl = statCardChartUrl({
+    runner: `${sys.cpu_count} × ${sys.cpu_model}`,
+    runnerSub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`,
+    duration: fmtDuration(report.duration_seconds),
+    samples: report.sample_count,
+    cpuAvg: cpuAvgPct,
+    cpuPeak: cpuPeakPct,
+    memAvgPct,
+    memPeakPct,
+    memPeakGb: `${(report.memory.max / 1024).toFixed(1)} GB`,
+  });
+  imgs['stat-cards'] = `<img src="${statUrl}" alt="Stats" width="600" height="120" />`;
+
+  // Per-step bar chart
+  if (report.steps && report.steps.length > 0) {
+    const barUrl = barChartUrl(
+      report.steps.map(s => ({ name: s.name, durationSec: s.duration_seconds })),
+    );
+    const h = Math.max(100, report.steps.length * 28 + 30);
+    imgs['step-chart'] = `<img src="${barUrl}" alt="Per-step durations" width="600" height="${h}" />`;
+  }
+
+  // Timeline chart
+  if (!minimal) {
+    const cpuV = samples.map(s => s.cpu.usage);
+    const memV = samples.map(s => s.memory.usage_pct);
+    if (cpuV.length >= 4) {
+      const tlUrl = timelineChartUrl(cpuV, memV, {
+        cpuAvg: cpuAvgPct,
+        memAvg: memAvgPct,
+      });
+      imgs['timeline'] = `<img src="${tlUrl}" alt="CPU &amp; Memory Timeline" width="600" height="200" />`;
+    }
+  }
+
+  return imgs;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Markdown builder
 // ─────────────────────────────────────────────────────────────
 
@@ -153,23 +216,23 @@ function markdown(
   config: MonitorConfig,
 ): string {
   const L: string[] = [];
-  const charts = generateSvgCharts(report, samples, config);
+  const charts = generateQuickchartImgs(report, samples, config);
 
   // ── Header ──────────────────────────────────────────────
   L.push('## 📊 RunnerLens\n');
 
-  // ── Stat cards (SVG) ───────────────────────────────────
+  // ── Stat cards ─────────────────────────────────────────
   if (charts['stat-cards']) {
     L.push(charts['stat-cards'] + '\n');
   }
 
-  // ── Per-step bar chart (SVG) ──────────────────────────
+  // ── Per-step bar chart ─────────────────────────────────
   if (charts['step-chart']) {
     L.push('### Steps\n');
     L.push(charts['step-chart'] + '\n');
   }
 
-  // ── Timeline (SVG) ────────────────────────────────────
+  // ── Timeline ──────────────────────────────────────────
   if (charts['timeline']) {
     L.push('### Timeline\n');
     L.push(charts['timeline'] + '\n');
@@ -214,9 +277,9 @@ export function processMetrics(
 }
 
 /**
- * Build the per-job markdown summary using inline SVG charts.
- * SVG charts are resolved to static colors and stripped of <style>
- * blocks so they render correctly in GitHub Job Summary.
+ * Build the per-job markdown summary using quickchart.io image URLs.
+ * GitHub Job Summary only allows https:// image URLs — inline SVG
+ * and data: URIs are stripped by the sanitizer.
  */
 export function buildJobMarkdown(
   report: AggregatedReport,

@@ -210,36 +210,37 @@ export function generateWorkflowCharts(jobs: JobReport[]): Record<string, string
 }
 
 // ─────────────────────────────────────────────────────────────
-// Build workflow markdown with inline SVG charts
+// Build workflow markdown with quickchart.io image URLs
+// GitHub Job Summary only allows https:// image URLs.
 // ─────────────────────────────────────────────────────────────
 
-function workflowMarkdownSvg(jobs: JobReport[]): string {
+function workflowMarkdownQuickchart(jobs: JobReport[]): string {
   const L: string[] = [];
-  const svgs = generateWorkflowSvgs(jobs);
+  const urls = generateWorkflowCharts(jobs);
 
   L.push('## 📊 RunnerLens — Workflow Summary\n');
 
   // Stat cards
-  if (svgs['stat-cards']) {
-    L.push(svgs['stat-cards'] + '\n');
+  if (urls['stat-cards']) {
+    L.push(`<img src="${urls['stat-cards']}" alt="Workflow stats" width="600" height="120" />\n`);
   }
 
   // CPU Usage
-  if (svgs['cpu-timeline']) {
+  if (urls['cpu-timeline']) {
     L.push('### CPU Usage\n');
-    L.push(svgs['cpu-timeline'] + '\n');
+    L.push(`<img src="${urls['cpu-timeline']}" alt="CPU Timeline" width="600" height="160" />\n`);
   }
 
   // Memory Usage
-  if (svgs['mem-timeline']) {
+  if (urls['mem-timeline']) {
     L.push('### Memory Usage\n');
-    L.push(svgs['mem-timeline'] + '\n');
+    L.push(`<img src="${urls['mem-timeline']}" alt="Memory Timeline" width="600" height="160" />\n`);
   }
 
   // Execution Timeline (Waterfall)
-  if (svgs['waterfall']) {
+  if (urls['waterfall']) {
     L.push('### Execution Timeline\n');
-    L.push(svgs['waterfall'] + '\n');
+    L.push(`<img src="${urls['waterfall']}" alt="Execution Timeline" width="600" height="200" />\n`);
   }
 
   L.push('---');
@@ -256,15 +257,15 @@ function workflowMarkdownSvg(jobs: JobReport[]): string {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Build workflow-level markdown using inline SVG charts.
- * SVG charts are resolved to static colors and stripped of <style>
- * blocks so they render correctly in GitHub Job Summary.
+ * Build workflow-level markdown using quickchart.io image URLs.
+ * GitHub Job Summary only allows https:// image URLs — inline SVG
+ * and data: URIs are stripped by the sanitizer.
  */
 export function workflowMarkdown(
   jobs: JobReport[],
   _config?: MonitorConfig,
 ): string {
-  return workflowMarkdownSvg(jobs);
+  return workflowMarkdownQuickchart(jobs);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -291,7 +292,7 @@ export async function runSummary(config: MonitorConfig): Promise<void> {
   if (config.githubToken && Object.keys(svgs).length > 0) {
     await uploadChartSvgs(svgs, config.githubToken);
   }
-  // Build workflow markdown with inline SVG charts
+  // Build workflow markdown with quickchart.io image URLs
   const md = workflowMarkdown(jobs, config);
   await core.summary.addRaw(md).write();
   core.info('RunnerLens: workflow summary written to Job Summary');

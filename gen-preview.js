@@ -76,7 +76,7 @@ const html = `<!DOCTYPE html>
   body { background:#0d1117; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; max-width:720px; margin:40px auto; padding:0 20px; line-height:1.6; }
   h2,h3 { border-bottom:1px solid #21262d; padding-bottom:8px; }
   a { color:#58a6ff; } sub { color:#8b949e; }
-  svg { max-width:100%; height:auto; display:block; margin:12px 0; }
+  svg, img { max-width:100%; height:auto; display:block; margin:12px 0; }
   hr { border:none; border-top:1px solid #21262d; margin:16px 0; }
 </style>
 </head>

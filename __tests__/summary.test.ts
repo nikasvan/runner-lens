@@ -11,7 +11,13 @@ import type {
   MonitorConfig, AggregatedReport, JobReport,
 } from '../src/types';
 
-/** Decode all base64 SVG <img> tags in markdown and return the raw SVG text. */
+/** Decode all quickchart.io URLs in markdown and return the raw chart config JSON text. */
+function decodeChartsInMarkdown(md: string): string {
+  const matches = [...md.matchAll(/src="https:\/\/quickchart\.io\/chart\?c=([^&"]+)/g)];
+  return matches.map(m => decodeURIComponent(m[1])).join('\n');
+}
+
+/** Decode all base64 SVG <img> tags and return the raw SVG text. */
 function decodeSvgsInMarkdown(md: string): string {
   const matches = [...md.matchAll(/base64,([^"]+)/g)];
   return matches.map(m => Buffer.from(m[1], 'base64').toString('utf8')).join('\n');
@@ -131,30 +137,27 @@ describe('generateWorkflowCharts (quickchart fallback)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// workflowMarkdown — SVG mode (with chart URLs)
-// ─────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────
-// workflowMarkdown — always renders inline SVG charts
+// workflowMarkdown — renders quickchart.io image URLs
 // ─────────────────────────────────────────────────────────────
 
 describe('workflowMarkdown', () => {
-  it('renders inline SVG charts', () => {
+  it('renders quickchart image tags', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
     expect(md).toContain('<img ');
-    expect(decodeSvgsInMarkdown(md)).toContain('AMD EPYC');
+    expect(md).toContain('quickchart.io');
+    expect(decodeChartsInMarkdown(md)).toContain('AMD EPYC');
   });
 
   it('renders header and runner info in stat cards', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    expect(decodeSvgsInMarkdown(md)).toContain('AMD EPYC');
-    expect(decodeSvgsInMarkdown(md)).toContain('7.0 GB RAM');
-    expect(decodeSvgsInMarkdown(md)).toContain('Linux');
+    expect(decodeChartsInMarkdown(md)).toContain('AMD EPYC');
+    expect(decodeChartsInMarkdown(md)).toContain('7.0 GB');
+    expect(decodeChartsInMarkdown(md)).toContain('Linux');
   });
 
-  it('renders stat cards as inline SVG', () => {
+  it('renders stat cards with CPU and memory info', () => {
     const md = workflowMarkdown(
       [
         makeJob('build', { cpu: { avg: 60, max: 92, min: 10, p50: 55, p95: 85, p99: 90, latest: 50 }, sample_count: 30 }),
@@ -163,7 +166,7 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('<img ');
-    expect(decodeSvgsInMarkdown(md)).toContain('Avg CPU');
+    expect(decodeChartsInMarkdown(md)).toContain('CPU');
   });
 
   it('renders CPU and Memory usage charts', () => {
@@ -185,8 +188,8 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('### Execution Timeline');
-    expect(decodeSvgsInMarkdown(md)).toContain('Checkout');
-    expect(decodeSvgsInMarkdown(md)).toContain('Compile');
+    expect(decodeChartsInMarkdown(md)).toContain('Checkout');
+    expect(decodeChartsInMarkdown(md)).toContain('Compile');
   });
 
   it('sorts jobs chronologically in execution timeline', () => {
@@ -200,7 +203,7 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    const decoded = decodeSvgsInMarkdown(md);
+    const decoded = decodeChartsInMarkdown(md);
     const buildIdx = decoded.indexOf('a-build');
     const testIdx = decoded.indexOf('z-test');
     expect(buildIdx).toBeGreaterThan(-1);
@@ -216,8 +219,8 @@ describe('workflowMarkdown', () => {
 
   it('handles single job correctly', () => {
     const md = workflowMarkdown([makeJob('deploy')], makeConfig());
-    expect(decodeSvgsInMarkdown(md)).toContain('1 job');
-    expect(decodeSvgsInMarkdown(md)).not.toContain('1 jobs');
+    expect(decodeChartsInMarkdown(md)).toContain('samples');
+    expect(md).toContain('quickchart.io');
   });
 
   it('omits timeline when no timeline data exists', () => {

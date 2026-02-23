@@ -173,7 +173,7 @@ async function run(): Promise<void> {
     if (config.githubToken && Object.keys(charts).length > 0) {
       await uploadChartSvgs(charts, config.githubToken);
     }
-    // Build per-job markdown with inline SVG charts
+    // Build per-job markdown with quickchart.io image URLs
     const markdown = buildJobMarkdown(report, samples, config);
 
     if (markdown) {

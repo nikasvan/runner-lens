@@ -3,7 +3,8 @@
 //
 // Generates permanent chart image URLs via quickchart.io.
 // Chart config is encoded in the GET URL itself — no API calls,
-// no uploads, no tokens needed. Images render on-the-fly as SVG.
+// no uploads, no tokens needed. Images render on-the-fly as PNG.
+// PNG format is required: GitHub sanitizes SVG in Job Summary.
 // ─────────────────────────────────────────────────────────────
 
 import { fmtDuration } from './charts';
@@ -52,7 +53,9 @@ function makeUrl(
 ): string {
   const w = opts.width ?? 600;
   const h = opts.height ?? 200;
-  return `${QC_BASE}?c=${encodeURIComponent(config)}&w=${w}&h=${h}&bkg=${encodeURIComponent(C.bg)}&f=svg`;
+  // PNG format (default) — GitHub blocks SVG in Job Summary.
+  // devicePixelRatio=1 keeps URLs shorter while still sharp at 600px.
+  return `${QC_BASE}?c=${encodeURIComponent(config)}&w=${w}&h=${h}&bkg=${encodeURIComponent(C.bg)}`;
 }
 
 // ── Per-job Timeline (CPU + Memory area chart) ──────────────

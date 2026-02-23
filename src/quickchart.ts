@@ -58,6 +58,48 @@ function makeUrl(
   return `${QC_BASE}?c=${encodeURIComponent(config)}&w=${w}&h=${h}&bkg=${encodeURIComponent(C.bg)}`;
 }
 
+// ── Stat Cards (CPU + Memory bars with runner info) ─────────
+
+export function statCardChartUrl(opts: {
+  runner: string;
+  runnerSub: string;
+  duration: string;
+  samples: number;
+  cpuAvg: number;
+  cpuPeak: number;
+  memAvgPct: number;
+  memPeakPct: number;
+  memPeakGb: string;
+}): string {
+  // Truncate long CPU names to keep URL short
+  const runner = opts.runner.length > 30 ? opts.runner.slice(0, 29) + '…' : opts.runner;
+  const title = `${runner} · ${opts.runnerSub} · ${opts.duration} · ${opts.samples} samples`;
+
+  const config = JSON.stringify({
+    type: 'horizontalBar',
+    data: {
+      labels: [
+        `CPU ${opts.cpuAvg.toFixed(0)}% avg (peak ${opts.cpuPeak.toFixed(0)}%)`,
+        `Mem ${opts.memAvgPct.toFixed(0)}% avg (peak ${opts.memPeakPct.toFixed(0)}% · ${opts.memPeakGb})`,
+      ],
+      datasets: [{
+        data: [Math.round(opts.cpuAvg), Math.round(opts.memAvgPct)],
+        backgroundColor: [C.cpu, C.mem],
+      }],
+    },
+    options: {
+      title: { display: true, text: title, fontColor: C.fg, fontSize: 11 },
+      scales: {
+        xAxes: [{ ticks: { min: 0, max: 100, fontColor: C.muted }, gridLines: { color: C.grid } }],
+        yAxes: [{ ticks: { fontColor: C.fg, fontSize: 11 }, gridLines: { display: false } }],
+      },
+      legend: { display: false },
+    },
+  });
+
+  return makeUrl(config, { height: 120 });
+}
+
 // ── Per-job Timeline (CPU + Memory area chart) ──────────────
 
 export function timelineChartUrl(

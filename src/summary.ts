@@ -14,7 +14,7 @@ import {
   type TimelineSegment,
 } from './svg-charts';
 import { htmlStatCards, htmlTimeline, htmlWaterfall } from './html-charts';
-import { waterfallChartUrl, workflowTimelineUrl } from './quickchart';
+import { statCardChartUrl, waterfallChartUrl, workflowTimelineUrl } from './quickchart';
 import { uploadChartSvgs } from './svg-upload';
 import { REPORT_VERSION } from './constants';
 
@@ -169,6 +169,19 @@ export function generateWorkflowCharts(jobs: JobReport[]): Record<string, string
   const urls: Record<string, string> = {};
   const a = aggregateStats(jobs);
   const sorted = sortedJobs(jobs);
+
+  // Stat cards
+  urls['stat-cards'] = statCardChartUrl({
+    runner: `${a.sys.cpu_count} × ${a.sys.cpu_model}`,
+    runnerSub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB · ${a.sys.runner_os}`,
+    duration: fmtDuration(a.totalDuration),
+    samples: a.totalSamples,
+    cpuAvg: a.weightedCpuAvg,
+    cpuPeak: a.cpuPeak,
+    memAvgPct: a.memAvgPct,
+    memPeakPct: a.memPeakPct,
+    memPeakGb: `${(a.memPeak / 1024).toFixed(1)} GB`,
+  });
 
   // CPU timeline
   const cpuValues = sorted.filter(j => j.report.timeline).flatMap(j => j.report.timeline!.cpu_pct);

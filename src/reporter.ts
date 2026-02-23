@@ -8,7 +8,7 @@ import { htmlStatCards, htmlBarChart, htmlTimeline } from './html-charts';
 import {
   svgImg, statCards, timelineChart, stepBarChart,
 } from './svg-charts';
-import { timelineChartUrl, barChartUrl } from './quickchart';
+import { statCardChartUrl, timelineChartUrl, barChartUrl } from './quickchart';
 import { REPORT_VERSION } from './constants';
 
 const TIMELINE_POINTS = 80;
@@ -156,9 +156,24 @@ function generateChartUrls(
 ): Record<string, string> {
   const urls: Record<string, string> = {};
   const minimal = config.summaryStyle === 'minimal';
+  const sys = report.system;
 
   const cpuAvgPct = report.cpu.avg;
   const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
+  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
+
+  // Stat cards as horizontal bar chart
+  urls['stat-cards'] = statCardChartUrl({
+    runner: `${sys.cpu_count} × ${sys.cpu_model}`,
+    runnerSub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB · ${sys.runner_os}`,
+    duration: fmtDuration(report.duration_seconds),
+    samples: report.sample_count,
+    cpuAvg: cpuAvgPct,
+    cpuPeak: report.cpu.max,
+    memAvgPct,
+    memPeakPct,
+    memPeakGb: `${(report.memory.max / 1024).toFixed(1)} GB`,
+  });
 
   // Per-step bar chart
   if (report.steps && report.steps.length > 0) {

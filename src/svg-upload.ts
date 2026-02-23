@@ -18,7 +18,7 @@ async function ghApi(
   method: string,
   endpoint: string,
   body?: Record<string, unknown>,
-): Promise<{ ok: boolean; status: number; data: any }> {
+): Promise<{ ok: boolean; status: number; data: any; message?: string }> {
   const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
   const repo = process.env.GITHUB_REPOSITORY;
   if (!repo) throw new Error('GITHUB_REPOSITORY not set');
@@ -35,43 +35,41 @@ async function ghApi(
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 
-  const data = res.ok ? await res.json() : null;
-  return { ok: res.ok, status: res.status, data };
+  let data: any = null;
+  let message: string | undefined;
+  try {
+    data = await res.json();
+    if (!res.ok) {
+      message = data?.message ?? `HTTP ${res.status}`;
+    }
+  } catch {
+    if (!res.ok) message = `HTTP ${res.status}`;
+  }
+  return { ok: res.ok, status: res.status, data, message };
 }
 
 // ── Branch management ───────────────────────────────────────
 
-/** Ensure the assets branch exists. Returns the tip commit SHA. */
-async function ensureBranch(token: string): Promise<string> {
+/**
+ * Get the tip commit SHA of the assets branch, or null if it doesn't exist.
+ */
+async function getBranchTip(token: string): Promise<string | null> {
   const ref = await ghApi(token, 'GET', `/git/ref/heads/${BRANCH}`);
   if (ref.ok) return ref.data.object.sha;
+  return null;
+}
 
-  // Create orphan branch with empty tree
-  const tree = await ghApi(token, 'POST', '/git/trees', { tree: [] });
-  if (!tree.ok) throw new Error(`Failed to create tree: ${tree.status}`);
-
-  const commit = await ghApi(token, 'POST', '/git/commits', {
-    message: 'Initialize RunnerLens assets branch',
-    tree: tree.data.sha,
-    parents: [],
-  });
-  if (!commit.ok) throw new Error(`Failed to create commit: ${commit.status}`);
-
+/**
+ * Create the assets branch as an orphan with the given tree SHA.
+ * Returns true if created (or already exists from a concurrent job).
+ */
+async function createBranch(token: string, commitSha: string): Promise<boolean> {
   const newRef = await ghApi(token, 'POST', '/git/refs', {
     ref: `refs/heads/${BRANCH}`,
-    sha: commit.data.sha,
+    sha: commitSha,
   });
   // 422 means another job created it first — that's fine
-  if (!newRef.ok && newRef.status !== 422) {
-    throw new Error(`Failed to create branch: ${newRef.status}`);
-  }
-  // Re-read the ref to get the actual tip SHA
-  if (!newRef.ok) {
-    const retry = await ghApi(token, 'GET', `/git/ref/heads/${BRANCH}`);
-    if (retry.ok) return retry.data.object.sha;
-    throw new Error('Failed to read branch after creation');
-  }
-  return commit.data.sha;
+  return newRef.ok || newRef.status === 422;
 }
 
 // ── Upload ──────────────────────────────────────────────────
@@ -100,56 +98,82 @@ export async function uploadChartSvgs(
     : `${serverUrl}/${repo}/raw`;
 
   try {
-    // Create blobs for all SVGs in parallel
+    // Create blobs for all SVGs in parallel (base64 for reliability)
     const blobResults = await Promise.all(
       entries.map(([, svg]) =>
-        ghApi(token, 'POST', '/git/blobs', { content: svg, encoding: 'utf-8' }),
+        ghApi(token, 'POST', '/git/blobs', {
+          content: Buffer.from(svg, 'utf-8').toString('base64'),
+          encoding: 'base64',
+        }),
       ),
     );
     for (const b of blobResults) {
-      if (!b.ok) throw new Error(`Blob creation failed: ${b.status}`);
+      if (!b.ok) throw new Error(`Blob creation failed: ${b.status} — ${b.message}`);
     }
+
+    const treeItems = entries.map(([name], i) => ({
+      path: `${subdir}/${name}.svg`,
+      mode: '100644' as const,
+      type: 'blob' as const,
+      sha: blobResults[i].data.sha as string,
+    }));
 
     // Commit & push with retry (handles concurrent updates from parallel jobs)
     for (let attempt = 0; attempt < 3; attempt++) {
-      const tipSha = await ensureBranch(token);
+      const tipSha = await getBranchTip(token);
 
-      const tipCommit = await ghApi(token, 'GET', `/git/commits/${tipSha}`);
-      if (!tipCommit.ok) throw new Error(`Failed to get tip commit: ${tipCommit.status}`);
+      let treeSha: string;
+      if (tipSha) {
+        // Branch exists — merge our files into the existing tree
+        const tipCommit = await ghApi(token, 'GET', `/git/commits/${tipSha}`);
+        if (!tipCommit.ok) throw new Error(`Failed to get tip commit: ${tipCommit.status}`);
 
-      const treeItems = entries.map(([name], i) => ({
-        path: `${subdir}/${name}.svg`,
-        mode: '100644',
-        type: 'blob',
-        sha: blobResults[i].data.sha,
-      }));
-
-      const newTree = await ghApi(token, 'POST', '/git/trees', {
-        base_tree: tipCommit.data.tree.sha,
-        tree: treeItems,
-      });
-      if (!newTree.ok) throw new Error(`Tree creation failed: ${newTree.status}`);
+        const newTree = await ghApi(token, 'POST', '/git/trees', {
+          base_tree: tipCommit.data.tree.sha,
+          tree: treeItems,
+        });
+        if (!newTree.ok) throw new Error(`Tree creation failed: ${newTree.status} — ${newTree.message}`);
+        treeSha = newTree.data.sha;
+      } else {
+        // Branch doesn't exist — create tree from scratch (no base_tree)
+        const newTree = await ghApi(token, 'POST', '/git/trees', { tree: treeItems });
+        if (!newTree.ok) throw new Error(`Tree creation failed: ${newTree.status} — ${newTree.message}`);
+        treeSha = newTree.data.sha;
+      }
 
       const newCommit = await ghApi(token, 'POST', '/git/commits', {
         message: `RunnerLens: charts for run #${runId} (${jobName})`,
-        tree: newTree.data.sha,
-        parents: [tipSha],
+        tree: treeSha,
+        parents: tipSha ? [tipSha] : [],
       });
-      if (!newCommit.ok) throw new Error(`Commit creation failed: ${newCommit.status}`);
+      if (!newCommit.ok) throw new Error(`Commit creation failed: ${newCommit.status} — ${newCommit.message}`);
 
-      const update = await ghApi(token, 'PATCH', `/git/refs/heads/${BRANCH}`, {
-        sha: newCommit.data.sha,
-      });
-
-      if (update.ok) {
-        for (const [name] of entries) {
-          urls[name] = `${rawBase}/${BRANCH}/${subdir}/${name}.svg`;
+      if (tipSha) {
+        // Update existing branch ref
+        const update = await ghApi(token, 'PATCH', `/git/refs/heads/${BRANCH}`, {
+          sha: newCommit.data.sha,
+        });
+        if (update.ok) {
+          for (const [name] of entries) {
+            urls[name] = `${rawBase}/${BRANCH}/${subdir}/${name}.svg`;
+          }
+          core.info(`RunnerLens: uploaded ${entries.length} chart(s) to ${BRANCH} branch`);
+          return urls;
         }
-        core.info(`RunnerLens: uploaded ${entries.length} chart(s) to ${BRANCH} branch`);
-        return urls;
+        // Ref update failed (concurrent push) — retry
+      } else {
+        // Create new branch with this commit
+        const created = await createBranch(token, newCommit.data.sha);
+        if (created) {
+          for (const [name] of entries) {
+            urls[name] = `${rawBase}/${BRANCH}/${subdir}/${name}.svg`;
+          }
+          core.info(`RunnerLens: created ${BRANCH} branch with ${entries.length} chart(s)`);
+          return urls;
+        }
+        // Another job created the branch — retry with base_tree merge
       }
 
-      // Ref update failed (concurrent push) — retry after brief delay
       if (attempt < 2) {
         await new Promise(r => setTimeout(r, 500 + Math.random() * 1500));
       }

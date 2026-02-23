@@ -150,9 +150,9 @@ describe('processMetrics', () => {
     expect(report.cpu.avg).toBe(45);
     expect(report.memory.total_mb).toBe(7168);
 
-    // Markdown format — inline SVG stat cards
+    // Markdown format — HTML stat cards
     expect(markdown).toContain('RunnerLens');
-    expect(markdown).toContain('<svg'); // inline SVG stat cards
+    expect(markdown).toContain('<table>'); // HTML stat cards
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {

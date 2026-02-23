@@ -4,7 +4,7 @@ import type {
 } from './types';
 import { stats, safeMax, safePct } from './stats';
 import { fmtDuration } from './charts';
-import { timelineChart, stepBarChart, statCards, svgImg } from './svg-charts';
+import { htmlStatCards, htmlBarChart, htmlTimeline } from './html-charts';
 import { REPORT_VERSION } from './constants';
 
 const TIMELINE_POINTS = 80;
@@ -113,21 +113,22 @@ function markdown(
   L.push('## 📊 RunnerLens\n');
 
   // ── Stat cards ──────────────────────────────────────────
-  const cardsSvg = statCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
-    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, colorVar: 'accent-cyan' },
-    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, colorVar: 'accent-blue' },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
-  ]);
-  L.push(svgImg(cardsSvg, 'Summary stats', 600) + '\n');
+  L.push(htmlStatCards([
+    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}` },
+    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples` },
+    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%` },
+    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB` },
+  ]) + '\n');
 
   // ── Per-step breakdown ───────────────────────────────────
   if (report.steps && report.steps.length > 0) {
     L.push('<details open><summary><strong>📋 Per-Step Breakdown</strong></summary>\n');
 
-    const barData = report.steps.map((s) => ({ name: s.name, value: s.duration_seconds }));
-    const barSvg = stepBarChart(barData, { formatValue: fmtDuration });
-    if (barSvg) L.push(svgImg(barSvg, 'Per-step duration chart', 600) + '\n');
+    L.push(htmlBarChart(
+      report.steps.map((s) => ({ label: s.name, value: s.duration_seconds })),
+      { formatValue: fmtDuration },
+    ));
+    L.push('');
 
     L.push('| # | Step | Duration | CPU avg | CPU peak | Mem avg | Mem peak |');
     L.push('|---:|---|---:|---:|---:|---:|---:|');
@@ -147,14 +148,16 @@ function markdown(
     L.push('\n</details>\n');
   }
 
-  // ── Timeline chart ─────────────────────────────────────
+  // ── Timeline sparklines ────────────────────────────────
   if (!minimal) {
     const cpuV = samples.map((s) => s.cpu.usage);
     const memV = samples.map((s) => s.memory.usage_pct);
     if (cpuV.length >= 4) {
-      const tlSvg = timelineChart(cpuV, memV, { cpuAvg: cpuAvgPct, memAvg: memAvgPct });
       L.push('<details open><summary><strong>📈 Timeline</strong></summary>\n');
-      L.push(svgImg(tlSvg, 'CPU and Memory timeline', 600, 200));
+      L.push(htmlTimeline([
+        { label: 'CPU', values: cpuV, avg: `${cpuAvgPct.toFixed(0)}% avg` },
+        { label: 'Memory', values: memV, avg: `${memAvgPct.toFixed(0)}% avg` },
+      ]));
       L.push('\n</details>\n');
     }
   }

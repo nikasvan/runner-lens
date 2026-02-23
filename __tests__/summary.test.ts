@@ -69,13 +69,12 @@ describe('workflowMarkdown', () => {
   it('renders header and runner info in stat cards', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    // Runner info is inside inline SVG stat card
     expect(md).toContain('AMD EPYC');
     expect(md).toContain('7.0 GB RAM');
     expect(md).toContain('Linux');
   });
 
-  it('renders stat cards with aggregate metrics as inline SVG', () => {
+  it('renders stat cards as HTML table', () => {
     const md = workflowMarkdown(
       [
         makeJob('build', { cpu: { avg: 60, max: 92, min: 10, p50: 55, p95: 85, p99: 90, latest: 50 }, sample_count: 30 }),
@@ -83,17 +82,17 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    // Inline SVGs, no data URIs
-    expect(md).toContain('<svg');
-    expect(md).not.toContain('data:image/svg+xml');
+    expect(md).toContain('<table>');
+    expect(md).toContain('<td');
   });
 
-  it('renders CPU and Memory timeline charts with inline SVG', () => {
+  it('renders timeline sparklines', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
-    expect(md).toContain('### CPU Usage');
-    expect(md).toContain('### Memory Usage');
-    expect(md).toContain('<svg');
-    expect(md).not.toContain('data:image/svg+xml');
+    expect(md).toContain('### Timeline');
+    expect(md).toContain('```');
+    expect(md).toContain('CPU');
+    expect(md).toContain('Memory');
+    expect(md).toMatch(/[▁▂▃▄▅▆▇█]/);
   });
 
   it('renders execution timeline when steps exist', () => {
@@ -107,7 +106,8 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('### Execution Timeline');
-    expect(md).toContain('<svg');
+    expect(md).toContain('Checkout');
+    expect(md).toContain('Compile');
   });
 
   it('sorts jobs chronologically in execution timeline', () => {
@@ -121,7 +121,6 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    // Inline SVG should contain both job names in chronological order
     const buildIdx = md.indexOf('a-build');
     const testIdx = md.indexOf('z-test');
     expect(buildIdx).toBeGreaterThan(-1);
@@ -137,21 +136,19 @@ describe('workflowMarkdown', () => {
 
   it('handles single job correctly', () => {
     const md = workflowMarkdown([makeJob('deploy')], makeConfig());
-    // Job count is inside inline SVG stat card
     expect(md).toContain('1 job');
     expect(md).not.toContain('1 jobs');
   });
 
-  it('omits charts when no timeline data exists', () => {
+  it('omits timeline when no timeline data exists', () => {
     const md = workflowMarkdown(
       [makeJob('build', { timeline: undefined })],
       makeConfig(),
     );
-    expect(md).not.toContain('### CPU Usage');
-    expect(md).not.toContain('### Memory Usage');
+    expect(md).not.toContain('### Timeline');
   });
 
-  it('omits execution timeline table when no steps exist', () => {
+  it('omits execution timeline when no steps exist', () => {
     const md = workflowMarkdown([makeJob('build')], makeConfig());
     expect(md).not.toContain('### Execution Timeline');
   });

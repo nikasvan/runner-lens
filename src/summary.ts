@@ -9,8 +9,7 @@ import { DefaultArtifactClient } from '@actions/artifact';
 import type { MonitorConfig, JobReport, AggregatedReport } from './types';
 import { safePct } from './stats';
 import { fmtDuration } from './charts';
-import { workflowTimelineChart, waterfallChart, statCards, svgImg } from './svg-charts';
-import type { TimelineSegment, WaterfallStep } from './svg-charts';
+import { htmlStatCards, htmlTimeline, htmlWaterfall } from './html-charts';
 import { REPORT_VERSION } from './constants';
 
 // ─────────────────────────────────────────────────────────────
@@ -79,86 +78,57 @@ export function workflowMarkdown(jobs: JobReport[], _config?: MonitorConfig): st
   const memAvgPct = safePct(weightedMemAvg, totalMb);
   const memPeakPct = safePct(memPeak, totalMb);
   const jobLabel = `${jobs.length} job${jobs.length !== 1 ? 's' : ''}`;
-  const cardsSvg = statCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
-    { label: 'Duration', value: fmtDuration(totalDuration), sub: jobLabel, colorVar: 'accent-cyan' },
-    { label: 'Avg CPU', value: `${weightedCpuAvg.toFixed(0)}%`, sub: `peak ${cpuPeak.toFixed(0)}%`, colorVar: 'accent-blue' },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(memPeak / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
-  ]);
-  L.push(svgImg(cardsSvg, 'Summary stats', 600) + '\n');
+  L.push(htmlStatCards([
+    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}` },
+    { label: 'Duration', value: fmtDuration(totalDuration), sub: jobLabel },
+    { label: 'Avg CPU', value: `${weightedCpuAvg.toFixed(0)}%`, sub: `peak ${cpuPeak.toFixed(0)}%` },
+    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(memPeak / 1024).toFixed(1)} GB` },
+  ]) + '\n');
 
   // ── Sort jobs chronologically for timeline ──────────────
   const sorted = [...jobs].sort((a, b) =>
     new Date(a.report.started_at).getTime() - new Date(b.report.started_at).getTime(),
   );
 
-  // ── CPU Timeline Chart ──────────────────────────────────
-  const cpuSegments: TimelineSegment[] = sorted
-    .filter(j => j.report.timeline)
-    .map(j => ({ label: j.jobName, values: j.report.timeline!.cpu_pct, startedAt: j.report.started_at, endedAt: j.report.ended_at }));
+  // ── CPU & Memory Timeline Sparklines ───────────────────
+  const cpuSegments = sorted.filter(j => j.report.timeline).flatMap(j => j.report.timeline!.cpu_pct);
+  const memSegments = sorted.filter(j => j.report.timeline).flatMap(j => j.report.timeline!.mem_mb);
 
-  if (cpuSegments.length > 0) {
-    const cpuSvg = workflowTimelineChart(cpuSegments, {
-      color: 'cpu-stroke',
-      fillColor: 'cpu-fill',
-      yMax: 100,
-      yFormat: (v) => `${v.toFixed(0)}%`,
-      title: 'CPU Usage',
-    });
-    if (cpuSvg) {
-      L.push('### CPU Usage\n');
-      L.push(svgImg(cpuSvg, 'CPU usage timeline', 600) + '\n');
+  if (cpuSegments.length >= 2 || memSegments.length >= 2) {
+    const rows = [];
+    if (cpuSegments.length >= 2) {
+      rows.push({ label: 'CPU', values: cpuSegments, avg: `${weightedCpuAvg.toFixed(0)}% avg` });
     }
+    if (memSegments.length >= 2) {
+      const memPctValues = memSegments.map(v => totalMb > 0 ? (v / totalMb) * 100 : 0);
+      rows.push({ label: 'Memory', values: memPctValues, avg: `${memAvgPct.toFixed(0)}% avg` });
+    }
+    L.push('### Timeline\n');
+    L.push(htmlTimeline(rows) + '\n');
   }
 
-  // ── Memory Timeline Chart ───────────────────────────────
-  const memSegments: TimelineSegment[] = sorted
-    .filter(j => j.report.timeline)
-    .map(j => ({ label: j.jobName, values: j.report.timeline!.mem_mb, startedAt: j.report.started_at, endedAt: j.report.ended_at }));
-
-  if (memSegments.length > 0) {
-    const memSvg = workflowTimelineChart(memSegments, {
-      color: 'mem-stroke',
-      fillColor: 'mem-fill',
-      yMax: totalMb,
-      yFormat: (v) => `${(v / 1024).toFixed(1)} GB`,
-      title: 'Memory Usage',
-    });
-    if (memSvg) {
-      L.push('### Memory Usage\n');
-      L.push(svgImg(memSvg, 'Memory usage timeline', 600) + '\n');
-    }
-  }
-
-  // ── Execution Timeline (Waterfall Chart) ────────────────
+  // ── Execution Timeline (Waterfall) ─────────────────────
   const hasSteps = sorted.some(j => j.report.steps && j.report.steps.length > 0);
   if (hasSteps) {
-    // Compute absolute start times for each step
     const workflowStart = Math.min(...sorted.map(j => new Date(j.report.started_at).getTime()));
-    const wfSteps: WaterfallStep[] = [];
+    const wfRows = [];
     for (const j of sorted) {
       if (!j.report.steps) continue;
       const jobOffset = (new Date(j.report.started_at).getTime() - workflowStart) / 1000;
       let cumSec = 0;
       for (const s of j.report.steps) {
-        wfSteps.push({
-          label: `${j.jobName} · ${s.name}`,
+        wfRows.push({
+          job: j.jobName,
+          step: s.name,
           startSec: jobOffset + cumSec,
           durationSec: s.duration_seconds,
-          group: j.jobName,
         });
         cumSec += s.duration_seconds;
       }
     }
 
-    const wfSvg = waterfallChart(wfSteps, {
-      title: 'Execution Timeline',
-      formatDuration: fmtDuration,
-    });
-    if (wfSvg) {
-      L.push('### Execution Timeline\n');
-      L.push(svgImg(wfSvg, 'Execution timeline', 600) + '\n');
-    }
+    L.push('### Execution Timeline\n');
+    L.push(htmlWaterfall(wfRows) + '\n');
   }
 
   // ── Footer ─────────────────────────────────────────────

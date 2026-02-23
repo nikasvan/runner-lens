@@ -19,7 +19,6 @@ function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
   return {
     mode: 'summarize',
     sampleInterval: 3,
-
     summaryStyle: 'full',
     maxSizeMb: 100,
     apiKey: '',
@@ -62,6 +61,13 @@ function makeJob(name: string, overrides: Partial<AggregatedReport> = {}): JobRe
   return { jobName: name, report: makeReport(overrides) };
 }
 
+/** Extract and decode percent-encoded SVG from markdown by alt text. */
+function decodeSvgFromMd(md: string, alt: string): string {
+  const re = new RegExp(`data:image/svg\\+xml,([^"]+)" alt="${alt}"`);
+  const encoded = md.match(re)?.[1] ?? '';
+  return decodeURIComponent(encoded);
+}
+
 // ─────────────────────────────────────────────────────────────
 // workflowMarkdown
 // ─────────────────────────────────────────────────────────────
@@ -71,9 +77,7 @@ describe('workflowMarkdown', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
     // Runner info is inside SVG stat card
-    const b64 = md.match(/base64,([A-Za-z0-9+/=]+)" alt="Summary stats"/)?.[1];
-    expect(b64).toBeDefined();
-    const svg = Buffer.from(b64!, 'base64').toString();
+    const svg = decodeSvgFromMd(md, 'Summary stats');
     expect(svg).toContain('AMD EPYC');
     expect(svg).toContain('7.0 GB RAM');
     expect(svg).toContain('Linux');
@@ -87,7 +91,6 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    // Stat cards are rendered as base64 SVG image
     expect(md).toContain('alt="Summary stats"');
   });
 
@@ -95,7 +98,7 @@ describe('workflowMarkdown', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('### CPU Usage');
     expect(md).toContain('### Memory Usage');
-    expect(md).toContain('data:image/svg+xml;base64,');
+    expect(md).toContain('data:image/svg+xml,');
   });
 
   it('renders execution timeline table when steps exist', () => {
@@ -109,7 +112,6 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('### Execution Timeline');
-    // Execution timeline is now a waterfall SVG chart
     expect(md).toContain('alt="Execution timeline"');
   });
 
@@ -125,9 +127,8 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     // Waterfall chart is rendered as SVG — decode and verify a-build appears before z-test
-    const b64 = md.match(/base64,([A-Za-z0-9+/=]+)" alt="Execution timeline"/)?.[1];
-    expect(b64).toBeDefined();
-    const svg = Buffer.from(b64!, 'base64').toString();
+    const svg = decodeSvgFromMd(md, 'Execution timeline');
+    expect(svg.length).toBeGreaterThan(0);
     const buildIdx = svg.indexOf('a-build');
     const testIdx = svg.indexOf('z-test');
     expect(buildIdx).toBeGreaterThan(-1);
@@ -144,9 +145,7 @@ describe('workflowMarkdown', () => {
   it('handles single job correctly', () => {
     const md = workflowMarkdown([makeJob('deploy')], makeConfig());
     // Job count is inside SVG stat card — decode and verify singular
-    const b64 = md.match(/base64,([A-Za-z0-9+/=]+)" alt="Summary stats"/)?.[1];
-    expect(b64).toBeDefined();
-    const svg = Buffer.from(b64!, 'base64').toString();
+    const svg = decodeSvgFromMd(md, 'Summary stats');
     expect(svg).toContain('1 job');
     expect(svg).not.toContain('1 jobs');
   });

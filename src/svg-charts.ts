@@ -6,12 +6,17 @@ import { fmtDuration } from './charts';
 
 // ── Internal helpers ────────────────────────────────────────
 
-/** Encode an SVG string as a base64 data URI. */
+/**
+ * Encode an SVG string as a data URI.
+ * Uses percent-encoding rather than base64 for better compatibility
+ * with GitHub Job Summary's markdown sanitizer.
+ */
 function svgToDataUri(svg: string): string {
-  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+  const mini = svg.replace(/\n\s*/g, '').replace(/\s{2,}/g, ' ');
+  return `data:image/svg+xml,${encodeURIComponent(mini)}`;
 }
 
-/** Wrap an SVG string in an <img> tag with a base64 data URI. */
+/** Wrap an SVG string in an <img> tag with a data URI. */
 export function svgImg(svg: string, alt: string, width?: number, height?: number): string {
   const uri = svgToDataUri(svg);
   const dims = [

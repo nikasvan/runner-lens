@@ -4,20 +4,25 @@
 
 import { svgImg, timelineChart, stepBarChart, workflowTimelineChart, waterfallChart, statCards } from '../src/svg-charts';
 
+/** Extract and decode percent-encoded SVG from an <img> data URI. */
+function decodeSvgImg(img: string): string {
+  const encoded = img.match(/data:image\/svg\+xml,([^"]+)/)?.[1] ?? '';
+  return decodeURIComponent(encoded);
+}
+
 // ── svgImg ──────────────────────────────────────────────────
 
 describe('svgImg', () => {
   const trivialSvg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
 
-  it('produces an <img> tag with base64 data URI', () => {
+  it('produces an <img> tag with percent-encoded data URI', () => {
     const img = svgImg(trivialSvg, 'test');
-    expect(img).toMatch(/^<img src="data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+" alt="test" \/>$/);
+    expect(img).toMatch(/^<img src="data:image\/svg\+xml,[^"]+" alt="test" \/>$/);
   });
 
-  it('base64 decodes back to the original SVG', () => {
+  it('decodes back to the original SVG', () => {
     const img = svgImg(trivialSvg, 'test');
-    const b64 = img.match(/base64,([^"]+)/)?.[1] ?? '';
-    expect(Buffer.from(b64, 'base64').toString()).toBe(trivialSvg);
+    expect(decodeSvgImg(img)).toBe(trivialSvg);
   });
 
   it('includes width and height attributes when provided', () => {

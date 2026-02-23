@@ -152,7 +152,7 @@ describe('processMetrics', () => {
 
     // Markdown format — stat cards with SVG
     expect(markdown).toContain('RunnerLens');
-    expect(markdown).toContain('data:image/svg+xml;base64,'); // SVG stat cards
+    expect(markdown).toContain('data:image/svg+xml,'); // SVG stat cards
     expect(markdown).toContain('alt="Summary stats"');
   });
 

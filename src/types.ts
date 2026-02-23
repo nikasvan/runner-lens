@@ -116,6 +116,7 @@ export interface AggregatedReport {
 export interface JobReport {
   jobName: string;
   report: AggregatedReport;
+  summaryMd?: string;
 }
 
 export interface IngestPayload {

@@ -4,7 +4,7 @@
 
 import { stats, safeMax, safePct } from '../src/stats';
 import { fmtDuration } from '../src/charts';
-import { processMetrics } from '../src/reporter';
+import { processMetrics, buildJobMarkdown } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import type {
   MetricSample, SystemInfo, MonitorConfig, StepMetrics,
@@ -136,10 +136,10 @@ describe('fmtDuration', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('processMetrics', () => {
-  it('produces a complete report and markdown', () => {
+  it('produces a complete report and chart URLs', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
-    const { report, markdown } = processMetrics(
+    const { report, chartUrls } = processMetrics(
       [s1, s2], makeSysInfo(), makeConfig(), 6,
     );
 
@@ -150,9 +150,33 @@ describe('processMetrics', () => {
     expect(report.cpu.avg).toBe(45);
     expect(report.memory.total_mb).toBe(7168);
 
-    // Markdown format — HTML stat cards
-    expect(markdown).toContain('RunnerLens');
-    expect(markdown).toContain('<table>'); // HTML stat cards
+    // Chart URLs are Record<string, string>
+    expect(typeof chartUrls).toBe('object');
+  });
+
+  it('renders quickchart img tags when chart URLs exist', () => {
+    const samples = Array(10).fill(null).map((_, i) =>
+      makeSample({ timestamp: 1700000000 + i * 3, cpu: { user: i * 10, system: 5, idle: 85 - i * 10, iowait: 0, steal: 0, usage: i * 10 + 5 } }),
+    );
+    const { report, chartUrls } = processMetrics(samples, makeSysInfo(), makeConfig(), 30);
+
+    const md = buildJobMarkdown(report, samples, makeConfig(), chartUrls);
+    expect(md).toContain('RunnerLens');
+    // Timeline chart URL should be present as img
+    if (chartUrls['timeline']) {
+      expect(md).toContain('<img');
+      expect(md).toContain('quickchart.io');
+    }
+  });
+
+  it('falls back to HTML tables when no chart URLs', () => {
+    const s1 = makeSample({ timestamp: 1700000000 });
+    const s2 = makeSample({ timestamp: 1700000003 });
+    const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
+
+    const md = buildJobMarkdown(report, [s1, s2], makeConfig());
+    expect(md).toContain('RunnerLens');
+    expect(md).toContain('<table>'); // HTML stat cards fallback
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
@@ -162,12 +186,21 @@ describe('processMetrics', () => {
     expect(Number.isFinite(report.memory.avg)).toBe(true);
   });
 
-  it('produces no markdown when summaryStyle is none', () => {
+  it('produces no chart URLs when summaryStyle is none', () => {
     const s = makeSample();
-    const { markdown } = processMetrics(
+    const { chartUrls } = processMetrics(
       [s, s], makeSysInfo(), makeConfig({ summaryStyle: 'none' }), 60,
     );
-    expect(markdown).toBe('');
+    expect(Object.keys(chartUrls)).toHaveLength(0);
+  });
+
+  it('produces no markdown when summaryStyle is none', () => {
+    const s = makeSample();
+    const { report } = processMetrics(
+      [s, s], makeSysInfo(), makeConfig({ summaryStyle: 'none' }), 60,
+    );
+    const md = buildJobMarkdown(report, [s, s], makeConfig({ summaryStyle: 'none' }));
+    expect(md).toBe('');
   });
 
   it('deduplicates top processes by name keeping highest CPU', () => {
@@ -191,14 +224,15 @@ describe('processMetrics', () => {
     expect(report.memory.swap_max_mb).toBe(768);
   });
 
-  it('generates timeline in full and compact but not minimal', () => {
+  it('generates timeline chart URL in full but not minimal', () => {
     const samples = Array(10).fill(null).map((_, i) =>
       makeSample({ timestamp: 1700000000 + i * 3, cpu: { user: i * 10, system: 5, idle: 85 - i * 10, iowait: 0, steal: 0, usage: i * 10 + 5 } }),
     );
     const full = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'full' }), 30);
     const minimal = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30);
-    expect(full.markdown).toContain('Timeline');
-    expect(minimal.markdown).not.toContain('Timeline');
+    expect(full.chartUrls['timeline']).toBeDefined();
+    expect(full.chartUrls['timeline']).toContain('quickchart.io');
+    expect(minimal.chartUrls['timeline']).toBeUndefined();
   });
 
   it('includes timeline with correct length for multiple samples', () => {
@@ -300,11 +334,12 @@ describe('collector stats', () => {
     expect(report.collector).toBeUndefined();
   });
 
-  it('shows collector info in footer', () => {
+  it('shows collector info in markdown fallback', () => {
     const s = makeSample({ collector: { cpu_pct: 0.5, mem_mb: 3.2 } });
-    const { markdown } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
-    expect(markdown).toContain('Sampling:');
-    expect(markdown).toContain('0.5% CPU');
+    const { report } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
+    const md = buildJobMarkdown(report, [s, s], makeConfig());
+    expect(md).toContain('Sampling:');
+    expect(md).toContain('0.5% CPU');
   });
 });
 
@@ -313,23 +348,37 @@ describe('collector stats', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('per-step markdown', () => {
-  it('renders per-step table when steps provided', () => {
+  it('renders per-step table in fallback markdown when steps provided', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const steps: StepMetrics[] = [
       { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
       { name: 'Build', number: 2, duration_seconds: 120, cpu_avg: 67, cpu_max: 95, mem_avg_mb: 2300, mem_max_mb: 3100, sample_count: 40 },
     ];
-    const { markdown } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
-    expect(markdown).toContain('Per-Step Breakdown');
-    expect(markdown).toContain('Checkout');
-    expect(markdown).toContain('Build');
+    const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    const md = buildJobMarkdown(report, [s1, s2], makeConfig());
+    expect(md).toContain('Per-Step Breakdown');
+    expect(md).toContain('Checkout');
+    expect(md).toContain('Build');
+  });
+
+  it('generates step-chart URL when steps provided', () => {
+    const s1 = makeSample({ timestamp: 1700000000 });
+    const s2 = makeSample({ timestamp: 1700000003 });
+    const steps: StepMetrics[] = [
+      { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
+      { name: 'Build', number: 2, duration_seconds: 120, cpu_avg: 67, cpu_max: 95, mem_avg_mb: 2300, mem_max_mb: 3100, sample_count: 40 },
+    ];
+    const { chartUrls } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    expect(chartUrls['step-chart']).toBeDefined();
+    expect(chartUrls['step-chart']).toContain('quickchart.io');
   });
 
   it('omits per-step table when no steps', () => {
     const s = makeSample();
-    const { markdown } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
-    expect(markdown).not.toContain('Per-Step Breakdown');
+    const { report } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
+    const md = buildJobMarkdown(report, [s, s], makeConfig());
+    expect(md).not.toContain('Per-Step Breakdown');
   });
 });
 

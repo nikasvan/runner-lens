@@ -5,6 +5,7 @@ import type {
 import { stats, safeMax, safePct } from './stats';
 import { fmtDuration } from './charts';
 import { htmlStatCards, htmlBarChart, htmlTimeline } from './html-charts';
+import { timelineChartUrl, barChartUrl } from './quickchart';
 import { REPORT_VERSION } from './constants';
 
 const TIMELINE_POINTS = 80;
@@ -91,13 +92,51 @@ function aggregate(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Markdown — redesigned for readability
+// Generate quickchart.io URLs for charts
+// ─────────────────────────────────────────────────────────────
+
+function generateChartUrls(
+  report: AggregatedReport,
+  samples: MetricSample[],
+  config: MonitorConfig,
+): Record<string, string> {
+  const urls: Record<string, string> = {};
+  const minimal = config.summaryStyle === 'minimal';
+
+  const cpuAvgPct = report.cpu.avg;
+  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
+
+  // Per-step bar chart
+  if (report.steps && report.steps.length > 0) {
+    urls['step-chart'] = barChartUrl(
+      report.steps.map(s => ({ name: s.name, durationSec: s.duration_seconds })),
+    );
+  }
+
+  // Timeline chart
+  if (!minimal) {
+    const cpuV = samples.map(s => s.cpu.usage);
+    const memV = samples.map(s => s.memory.usage_pct);
+    if (cpuV.length >= 4) {
+      urls['timeline'] = timelineChartUrl(cpuV, memV, {
+        cpuAvg: cpuAvgPct,
+        memAvg: memAvgPct,
+      });
+    }
+  }
+
+  return urls;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Markdown builder
 // ─────────────────────────────────────────────────────────────
 
 function markdown(
   report: AggregatedReport,
   samples: MetricSample[],
   config: MonitorConfig,
+  chartUrls: Record<string, string>,
 ): string {
   const minimal = config.summaryStyle === 'minimal';
   const L: string[] = [];
@@ -112,7 +151,7 @@ function markdown(
   // ── Header ──────────────────────────────────────────────
   L.push('## 📊 RunnerLens\n');
 
-  // ── Stat cards ──────────────────────────────────────────
+  // ── Stat cards (HTML table) ────────────────────────────
   L.push(htmlStatCards([
     { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}` },
     { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples` },
@@ -120,15 +159,19 @@ function markdown(
     { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB` },
   ]) + '\n');
 
-  // ── Per-step breakdown ───────────────────────────────────
+  // ── Per-step breakdown ────────────────────────────────
   if (report.steps && report.steps.length > 0) {
     L.push('<details open><summary><strong>📋 Per-Step Breakdown</strong></summary>\n');
 
-    L.push(htmlBarChart(
-      report.steps.map((s) => ({ label: s.name, value: s.duration_seconds })),
-      { formatValue: fmtDuration },
-    ));
-    L.push('');
+    if (chartUrls['step-chart']) {
+      L.push(`\n<img src="${chartUrls['step-chart']}" alt="Per-step duration chart" width="600">\n`);
+    } else {
+      L.push(htmlBarChart(
+        report.steps.map((s) => ({ label: s.name, value: s.duration_seconds })),
+        { formatValue: fmtDuration },
+      ));
+      L.push('');
+    }
 
     L.push('| # | Step | Duration | CPU avg | CPU peak | Mem avg | Mem peak |');
     L.push('|---:|---|---:|---:|---:|---:|---:|');
@@ -148,17 +191,23 @@ function markdown(
     L.push('\n</details>\n');
   }
 
-  // ── Timeline sparklines ────────────────────────────────
+  // ── Timeline ──────────────────────────────────────────
   if (!minimal) {
-    const cpuV = samples.map((s) => s.cpu.usage);
-    const memV = samples.map((s) => s.memory.usage_pct);
-    if (cpuV.length >= 4) {
+    if (chartUrls['timeline']) {
       L.push('<details open><summary><strong>📈 Timeline</strong></summary>\n');
-      L.push(htmlTimeline([
-        { label: 'CPU', values: cpuV, avg: `${cpuAvgPct.toFixed(0)}% avg` },
-        { label: 'Memory', values: memV, avg: `${memAvgPct.toFixed(0)}% avg` },
-      ]));
+      L.push(`\n<img src="${chartUrls['timeline']}" alt="CPU and Memory timeline" width="600">`);
       L.push('\n</details>\n');
+    } else {
+      const cpuV = samples.map((s) => s.cpu.usage);
+      const memV = samples.map((s) => s.memory.usage_pct);
+      if (cpuV.length >= 4) {
+        L.push('<details open><summary><strong>📈 Timeline</strong></summary>\n');
+        L.push(htmlTimeline([
+          { label: 'CPU', values: cpuV, avg: `${cpuAvgPct.toFixed(0)}% avg` },
+          { label: 'Memory', values: memV, avg: `${memAvgPct.toFixed(0)}% avg` },
+        ]));
+        L.push('\n</details>\n');
+      }
     }
   }
 
@@ -167,9 +216,12 @@ function markdown(
   const collectorInfo = report.collector
     ? ` · Sampling: ${report.collector.avg_cpu_pct.toFixed(1)}% CPU · ${report.collector.avg_mem_mb.toFixed(1)} MB RAM`
     : '';
+  const reporterInfo = report.reporter
+    ? ` · Reporting: ${report.reporter.cpu_pct.toFixed(1)}% CPU · ${report.reporter.mem_mb.toFixed(1)} MB RAM`
+    : '';
   L.push(
     `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +
-    `v${REPORT_VERSION} · ${report.started_at} → ${report.ended_at}${collectorInfo}</sub>`,
+    `v${REPORT_VERSION} · ${report.started_at} → ${report.ended_at}${collectorInfo}${reporterInfo}</sub>`,
   );
 
   return L.join('\n');
@@ -185,8 +237,24 @@ export function processMetrics(
   config: MonitorConfig,
   durationSec: number,
   steps?: StepMetrics[],
-): { report: AggregatedReport; markdown: string } {
+): { report: AggregatedReport; chartUrls: Record<string, string> } {
   const report = aggregate(samples, sysInfo, durationSec, steps);
-  const md = config.summaryStyle === 'none' ? '' : markdown(report, samples, config);
-  return { report, markdown: md };
+  const chartUrls = config.summaryStyle === 'none'
+    ? {}
+    : generateChartUrls(report, samples, config);
+  return { report, chartUrls };
+}
+
+/**
+ * Build the per-job markdown summary.
+ * Uses quickchart.io image URLs for charts, HTML tables for stat cards.
+ */
+export function buildJobMarkdown(
+  report: AggregatedReport,
+  samples: MetricSample[],
+  config: MonitorConfig,
+  chartUrls?: Record<string, string>,
+): string {
+  if (config.summaryStyle === 'none') return '';
+  return markdown(report, samples, config, chartUrls ?? {});
 }

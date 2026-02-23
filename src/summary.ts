@@ -10,6 +10,7 @@ import type { MonitorConfig, JobReport, AggregatedReport } from './types';
 import { safePct } from './stats';
 import { fmtDuration } from './charts';
 import { htmlStatCards, htmlTimeline, htmlWaterfall } from './html-charts';
+import { waterfallChartUrl, workflowTimelineUrl } from './quickchart';
 import { REPORT_VERSION } from './constants';
 
 // ─────────────────────────────────────────────────────────────
@@ -50,20 +51,14 @@ export async function downloadJobReports(): Promise<JobReport[]> {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Render workflow-level markdown
+// Helpers shared by SVG and fallback rendering
 // ─────────────────────────────────────────────────────────────
 
-export function workflowMarkdown(jobs: JobReport[], _config?: MonitorConfig): string {
-  const L: string[] = [];
-
+function aggregateStats(jobs: JobReport[]) {
   const totalDuration = jobs.reduce((s, j) => s + j.report.duration_seconds, 0);
   const totalSamples = jobs.reduce((s, j) => s + j.report.sample_count, 0);
-
-  // ── Runner info (from first job) ────────────────────────
   const sys = jobs[0].report.system;
-  L.push('## 📊 RunnerLens — Workflow Summary\n');
 
-  // ── Aggregate stats ─────────────────────────────────────
   const weightedCpuAvg = totalSamples > 0
     ? jobs.reduce((s, j) => s + j.report.cpu.avg * j.report.sample_count, 0) / totalSamples
     : 0;
@@ -73,41 +68,166 @@ export function workflowMarkdown(jobs: JobReport[], _config?: MonitorConfig): st
   const cpuPeak = Math.max(...jobs.map((j) => j.report.cpu.max));
   const memPeak = Math.max(...jobs.map((j) => j.report.memory.max));
   const totalMb = sys.total_memory_mb;
-
-  // ── Stat cards ──────────────────────────────────────────
   const memAvgPct = safePct(weightedMemAvg, totalMb);
   const memPeakPct = safePct(memPeak, totalMb);
   const jobLabel = `${jobs.length} job${jobs.length !== 1 ? 's' : ''}`;
+
+  return {
+    totalDuration, totalSamples, sys,
+    weightedCpuAvg, weightedMemAvg, cpuPeak, memPeak,
+    totalMb, memAvgPct, memPeakPct, jobLabel,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Quickchart.io URL generation for workflow summary
+// ─────────────────────────────────────────────────────────────
+
+export function generateWorkflowCharts(jobs: JobReport[]): Record<string, string> {
+  const urls: Record<string, string> = {};
+  const a = aggregateStats(jobs);
+
+  // Sort jobs chronologically
+  const sorted = [...jobs].sort((x, y) =>
+    new Date(x.report.started_at).getTime() - new Date(y.report.started_at).getTime(),
+  );
+
+  // CPU timeline chart
+  const cpuValues = sorted
+    .filter(j => j.report.timeline)
+    .flatMap(j => j.report.timeline!.cpu_pct);
+
+  if (cpuValues.length >= 4) {
+    urls['cpu-timeline'] = workflowTimelineUrl(cpuValues, {
+      color: '#58a6ff',
+      fillColor: 'rgba(88,166,255,0.15)',
+      label: `CPU ${a.weightedCpuAvg.toFixed(0)}% avg`,
+      yMax: 100,
+    });
+  }
+
+  // Memory timeline chart
+  const memValues = sorted
+    .filter(j => j.report.timeline)
+    .flatMap(j => j.report.timeline!.mem_mb);
+
+  if (memValues.length >= 4) {
+    urls['mem-timeline'] = workflowTimelineUrl(memValues, {
+      color: '#bc8cff',
+      fillColor: 'rgba(188,140,255,0.15)',
+      label: `Mem ${a.memAvgPct.toFixed(0)}% avg`,
+      yMax: a.totalMb,
+    });
+  }
+
+  // Execution waterfall
+  const hasSteps = sorted.some(j => j.report.steps && j.report.steps.length > 0);
+  if (hasSteps) {
+    const workflowStart = Math.min(...sorted.map(j => new Date(j.report.started_at).getTime()));
+    const wfSteps: Array<{ job: string; step: string; startSec: number; durationSec: number }> = [];
+    for (const j of sorted) {
+      if (!j.report.steps) continue;
+      const jobOffset = (new Date(j.report.started_at).getTime() - workflowStart) / 1000;
+      let cumSec = 0;
+      for (const s of j.report.steps) {
+        wfSteps.push({
+          job: j.jobName,
+          step: s.name,
+          startSec: jobOffset + cumSec,
+          durationSec: s.duration_seconds,
+        });
+        cumSec += s.duration_seconds;
+      }
+    }
+
+    urls['waterfall'] = waterfallChartUrl(wfSteps);
+  }
+
+  return urls;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Build workflow markdown with quickchart.io image URLs
+// ─────────────────────────────────────────────────────────────
+
+function workflowMarkdownWithImages(
+  jobs: JobReport[],
+  chartUrls: Record<string, string>,
+): string {
+  const L: string[] = [];
+  const a = aggregateStats(jobs);
+
+  L.push('## 📊 RunnerLens — Workflow Summary\n');
+
+  // Stat cards as HTML table (quickchart can't do card layouts well)
   L.push(htmlStatCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}` },
-    { label: 'Duration', value: fmtDuration(totalDuration), sub: jobLabel },
-    { label: 'Avg CPU', value: `${weightedCpuAvg.toFixed(0)}%`, sub: `peak ${cpuPeak.toFixed(0)}%` },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(memPeak / 1024).toFixed(1)} GB` },
+    { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}` },
+    { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel },
+    { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%` },
+    { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB` },
   ]) + '\n');
 
-  // ── Sort jobs chronologically for timeline ──────────────
+  if (chartUrls['cpu-timeline']) {
+    L.push(`<img src="${chartUrls['cpu-timeline']}" alt="CPU Timeline" width="600">\n`);
+  }
+
+  if (chartUrls['mem-timeline']) {
+    L.push(`<img src="${chartUrls['mem-timeline']}" alt="Memory Timeline" width="600">\n`);
+  }
+
+  if (chartUrls['waterfall']) {
+    L.push('### Execution Timeline\n');
+    L.push(`<img src="${chartUrls['waterfall']}" alt="Execution Timeline" width="600">\n`);
+  }
+
+  L.push('---');
+  L.push(
+    `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +
+    `v${REPORT_VERSION} — Workflow Summary</sub>`,
+  );
+
+  return L.join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Fallback: HTML tables + Unicode sparklines
+// ─────────────────────────────────────────────────────────────
+
+function workflowMarkdownFallback(jobs: JobReport[]): string {
+  const L: string[] = [];
+  const a = aggregateStats(jobs);
+
+  L.push('## 📊 RunnerLens — Workflow Summary\n');
+
+  L.push(htmlStatCards([
+    { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}` },
+    { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel },
+    { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%` },
+    { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB` },
+  ]) + '\n');
+
   const sorted = [...jobs].sort((a, b) =>
     new Date(a.report.started_at).getTime() - new Date(b.report.started_at).getTime(),
   );
 
-  // ── CPU & Memory Timeline Sparklines ───────────────────
+  // CPU & Memory Timeline Sparklines
   const cpuSegments = sorted.filter(j => j.report.timeline).flatMap(j => j.report.timeline!.cpu_pct);
   const memSegments = sorted.filter(j => j.report.timeline).flatMap(j => j.report.timeline!.mem_mb);
 
   if (cpuSegments.length >= 2 || memSegments.length >= 2) {
     const rows = [];
     if (cpuSegments.length >= 2) {
-      rows.push({ label: 'CPU', values: cpuSegments, avg: `${weightedCpuAvg.toFixed(0)}% avg` });
+      rows.push({ label: 'CPU', values: cpuSegments, avg: `${a.weightedCpuAvg.toFixed(0)}% avg` });
     }
     if (memSegments.length >= 2) {
-      const memPctValues = memSegments.map(v => totalMb > 0 ? (v / totalMb) * 100 : 0);
-      rows.push({ label: 'Memory', values: memPctValues, avg: `${memAvgPct.toFixed(0)}% avg` });
+      const memPctValues = memSegments.map(v => a.totalMb > 0 ? (v / a.totalMb) * 100 : 0);
+      rows.push({ label: 'Memory', values: memPctValues, avg: `${a.memAvgPct.toFixed(0)}% avg` });
     }
     L.push('### Timeline\n');
     L.push(htmlTimeline(rows) + '\n');
   }
 
-  // ── Execution Timeline (Waterfall) ─────────────────────
+  // Execution Timeline (Waterfall)
   const hasSteps = sorted.some(j => j.report.steps && j.report.steps.length > 0);
   if (hasSteps) {
     const workflowStart = Math.min(...sorted.map(j => new Date(j.report.started_at).getTime()));
@@ -131,7 +251,6 @@ export function workflowMarkdown(jobs: JobReport[], _config?: MonitorConfig): st
     L.push(htmlWaterfall(wfRows) + '\n');
   }
 
-  // ── Footer ─────────────────────────────────────────────
   L.push('---');
   L.push(
     `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +
@@ -139,6 +258,26 @@ export function workflowMarkdown(jobs: JobReport[], _config?: MonitorConfig): st
   );
 
   return L.join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Build workflow-level markdown.
+ * When chartUrls are provided (SVGs uploaded), uses <img> tags.
+ * Otherwise falls back to HTML tables with Unicode sparklines.
+ */
+export function workflowMarkdown(
+  jobs: JobReport[],
+  _config?: MonitorConfig,
+  chartUrls?: Record<string, string>,
+): string {
+  if (chartUrls && Object.keys(chartUrls).length > 0) {
+    return workflowMarkdownWithImages(jobs, chartUrls);
+  }
+  return workflowMarkdownFallback(jobs);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -160,7 +299,10 @@ export async function runSummary(config: MonitorConfig): Promise<void> {
 
   core.info(`RunnerLens: found ${jobs.length} job report(s): ${jobs.map((j) => j.jobName).join(', ')}`);
 
-  const md = workflowMarkdown(jobs, config);
+  // Generate quickchart.io URLs for charts
+  const chartUrls = generateWorkflowCharts(jobs);
+
+  const md = workflowMarkdown(jobs, config, chartUrls);
   await core.summary.addRaw(md).write();
   core.info('RunnerLens: workflow summary written to Job Summary');
 

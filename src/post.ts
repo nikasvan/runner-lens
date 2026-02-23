@@ -5,7 +5,7 @@ import * as path from 'path';
 import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
-import { processMetrics } from './reporter';
+import { processMetrics, buildJobMarkdown } from './reporter';
 import { sendToApi } from './api-client';
 import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
@@ -144,7 +144,7 @@ async function run(): Promise<void> {
     }
 
     // ── Process ───────────────────────────────────────────
-    const { report, markdown } = processMetrics(samples, sysInfo, config, dur, steps);
+    const { report, chartUrls } = processMetrics(samples, sysInfo, config, dur, steps);
 
     // ── Reporter self-monitoring ──────────────────────────
     // Use total job duration as denominator so the % is directly
@@ -168,10 +168,11 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Job Summary ───────────────────────────────────────
+    // ── Build Job Summary ─────────────────────────────────
+    const markdown = buildJobMarkdown(report, samples, config, chartUrls);
+
     if (markdown) {
-      const reporterInfo = ` · Reporting: ${reporterCpuPct.toFixed(1)}% CPU · ${reporterMemMb.toFixed(1)} MB RAM`;
-      await core.summary.addRaw(markdown.replace('</sub>', `${reporterInfo}</sub>`)).write();
+      await core.summary.addRaw(markdown).write();
       core.info('RunnerLens: report written to Job Summary');
     }
 

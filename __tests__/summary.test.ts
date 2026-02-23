@@ -6,16 +6,10 @@ jest.mock('@actions/artifact', () => ({
   DefaultArtifactClient: jest.fn(),
 }));
 
-import { workflowMarkdown, generateWorkflowCharts, generateWorkflowSvgs } from '../src/summary';
+import { workflowMarkdown } from '../src/summary';
 import type {
   MonitorConfig, AggregatedReport, JobReport,
 } from '../src/types';
-
-/** Decode all quickchart.io URLs in markdown and return the raw chart config JSON text. */
-function decodeChartsInMarkdown(md: string): string {
-  const matches = [...md.matchAll(/src="https:\/\/quickchart\.io\/chart\?c=([^&"]+)/g)];
-  return matches.map(m => decodeURIComponent(m[1])).join('\n');
-}
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -68,87 +62,23 @@ function makeJob(name: string, overrides: Partial<AggregatedReport> = {}): JobRe
 }
 
 // ─────────────────────────────────────────────────────────────
-// generateWorkflowCharts
-// ─────────────────────────────────────────────────────────────
-
-describe('generateWorkflowSvgs', () => {
-  it('generates stat-cards SVG', () => {
-    const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
-    expect(svgs['stat-cards']).toBeDefined();
-    expect(svgs['stat-cards']).toContain('<svg');
-    expect(svgs['stat-cards']).toContain('AMD EPYC');
-  });
-
-  it('generates CPU and memory timeline SVGs', () => {
-    const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
-    expect(svgs['cpu-timeline']).toBeDefined();
-    expect(svgs['cpu-timeline']).toContain('<svg');
-    expect(svgs['mem-timeline']).toBeDefined();
-    expect(svgs['mem-timeline']).toContain('<svg');
-  });
-
-  it('generates waterfall SVG when steps exist', () => {
-    const svgs = generateWorkflowSvgs([makeJob('build', {
-      steps: [
-        { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
-        { name: 'Compile', number: 2, duration_seconds: 90, cpu_avg: 78, cpu_max: 95, mem_avg_mb: 3000, mem_max_mb: 4500, sample_count: 30 },
-      ],
-    })]);
-    expect(svgs['waterfall']).toBeDefined();
-    expect(svgs['waterfall']).toContain('<svg');
-  });
-
-  it('omits waterfall when no steps exist', () => {
-    const svgs = generateWorkflowSvgs([makeJob('build')]);
-    expect(svgs['waterfall']).toBeUndefined();
-  });
-});
-
-describe('generateWorkflowCharts (quickchart fallback)', () => {
-  it('generates CPU and memory timeline quickchart URLs', () => {
-    const urls = generateWorkflowCharts([makeJob('build'), makeJob('test')]);
-    expect(urls['cpu-timeline']).toBeDefined();
-    expect(urls['cpu-timeline']).toContain('quickchart.io');
-    expect(urls['mem-timeline']).toBeDefined();
-    expect(urls['mem-timeline']).toContain('quickchart.io');
-  });
-
-  it('generates waterfall quickchart URL when steps exist', () => {
-    const urls = generateWorkflowCharts([makeJob('build', {
-      steps: [
-        { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
-        { name: 'Compile', number: 2, duration_seconds: 90, cpu_avg: 78, cpu_max: 95, mem_avg_mb: 3000, mem_max_mb: 4500, sample_count: 30 },
-      ],
-    })]);
-    expect(urls['waterfall']).toBeDefined();
-    expect(urls['waterfall']).toContain('quickchart.io');
-  });
-
-  it('omits waterfall when no steps exist', () => {
-    const urls = generateWorkflowCharts([makeJob('build')]);
-    expect(urls['waterfall']).toBeUndefined();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// workflowMarkdown — renders quickchart.io image URLs
+// workflowMarkdown — renders Mermaid charts
 // ─────────────────────────────────────────────────────────────
 
 describe('workflowMarkdown', () => {
-  it('renders quickchart image tags', () => {
+  it('renders mermaid chart blocks', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    expect(md).toContain('<img ');
-    expect(md).toContain('quickchart.io');
-    expect(decodeChartsInMarkdown(md)).toContain('AMD EPYC');
+    expect(md).toContain('```mermaid');
+    expect(md).toContain('xychart-beta');
   });
 
   it('renders header and runner info in stat cards', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    expect(decodeChartsInMarkdown(md)).toContain('AMD EPYC');
-    expect(decodeChartsInMarkdown(md)).toContain('7.0 GB');
-    expect(decodeChartsInMarkdown(md)).toContain('Linux');
+    expect(md).toContain('AMD EPYC');
+    expect(md).toContain('7.0 GB');
+    expect(md).toContain('Linux');
   });
 
   it('renders stat cards with CPU and memory info', () => {
@@ -159,8 +89,8 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    expect(md).toContain('<img ');
-    expect(decodeChartsInMarkdown(md)).toContain('CPU');
+    expect(md).toContain('Avg CPU');
+    expect(md).toContain('Memory');
   });
 
   it('renders CPU and Memory usage charts', () => {
@@ -182,8 +112,9 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('### Execution Timeline');
-    expect(decodeChartsInMarkdown(md)).toContain('Checkout');
-    expect(decodeChartsInMarkdown(md)).toContain('Compile');
+    expect(md).toContain('gantt');
+    expect(md).toContain('Checkout');
+    expect(md).toContain('Compile');
   });
 
   it('sorts jobs chronologically in execution timeline', () => {
@@ -197,9 +128,8 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    const decoded = decodeChartsInMarkdown(md);
-    const buildIdx = decoded.indexOf('a-build');
-    const testIdx = decoded.indexOf('z-test');
+    const buildIdx = md.indexOf('section a-build');
+    const testIdx = md.indexOf('section z-test');
     expect(buildIdx).toBeGreaterThan(-1);
     expect(testIdx).toBeGreaterThan(-1);
     expect(buildIdx).toBeLessThan(testIdx);
@@ -213,8 +143,8 @@ describe('workflowMarkdown', () => {
 
   it('handles single job correctly', () => {
     const md = workflowMarkdown([makeJob('deploy')], makeConfig());
-    expect(decodeChartsInMarkdown(md)).toContain('samples');
-    expect(md).toContain('quickchart.io');
+    expect(md).toContain('1 job');
+    expect(md).toContain('```mermaid');
   });
 
   it('omits timeline when no timeline data exists', () => {

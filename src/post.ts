@@ -6,7 +6,6 @@ import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
 import { processMetrics, buildJobMarkdown } from './reporter';
-import { uploadChartSvgs } from './svg-upload';
 import { sendToApi } from './api-client';
 import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
@@ -145,7 +144,7 @@ async function run(): Promise<void> {
     }
 
     // ── Process ───────────────────────────────────────────
-    const { report, charts } = processMetrics(samples, sysInfo, config, dur, steps);
+    const { report } = processMetrics(samples, sysInfo, config, dur, steps);
 
     // ── Reporter self-monitoring ──────────────────────────
     // Use total job duration as denominator so the % is directly
@@ -169,11 +168,7 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Upload SVG charts as artifacts (for external reference) ──
-    if (config.githubToken && Object.keys(charts).length > 0) {
-      await uploadChartSvgs(charts, config.githubToken);
-    }
-    // Build per-job markdown with quickchart.io image URLs
+    // Build per-job markdown with Mermaid charts
     const markdown = buildJobMarkdown(report, samples, config);
 
     if (markdown) {

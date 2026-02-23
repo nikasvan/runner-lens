@@ -4,12 +4,7 @@ import type {
 } from './types';
 import { stats, safeMax, safePct } from './stats';
 import { fmtDuration } from './charts';
-import {
-  resolvedSvg, statCards, timelineChart, stepBarChart,
-} from './svg-charts';
-import {
-  statCardChartUrl, timelineChartUrl, barChartUrl,
-} from './quickchart';
+import { statCards, timelineChart, stepBarChart } from './mermaid-charts';
 import { REPORT_VERSION } from './constants';
 
 const TIMELINE_POINTS = 80;
@@ -96,61 +91,7 @@ function aggregate(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Generate SVG charts for upload (raw SVG strings)
-// ─────────────────────────────────────────────────────────────
-
-function generateSvgCharts(
-  report: AggregatedReport,
-  samples: MetricSample[],
-  config: MonitorConfig,
-): Record<string, string> {
-  const charts: Record<string, string> = {};
-  const minimal = config.summaryStyle === 'minimal';
-  const sys = report.system;
-
-  const cpuAvgPct = report.cpu.avg;
-  const cpuPeakPct = report.cpu.max;
-  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
-  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
-
-  // Stat cards
-  charts['stat-cards'] = resolvedSvg(statCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
-    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, colorVar: 'accent-cyan' },
-    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, colorVar: 'accent-blue' },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
-  ]));
-
-  // Per-step bar chart
-  if (report.steps && report.steps.length > 0) {
-    const svg = stepBarChart(
-      report.steps.map(s => ({ name: s.name, value: s.duration_seconds })),
-      { formatValue: fmtDuration },
-    );
-    if (svg) charts['step-chart'] = resolvedSvg(svg);
-  }
-
-  // Timeline chart
-  if (!minimal) {
-    const cpuV = samples.map(s => s.cpu.usage);
-    const memV = samples.map(s => s.memory.usage_pct);
-    if (cpuV.length >= 4) {
-      const svg = timelineChart(cpuV, memV, {
-        cpuAvg: cpuAvgPct,
-        memAvg: memAvgPct,
-      });
-      if (svg) charts['timeline'] = resolvedSvg(svg);
-    }
-  }
-
-  return charts;
-}
-
-// ─────────────────────────────────────────────────────────────
-// Markdown builder — uses quickchart.io image URLs
-// GitHub Job Summary only renders <img src="https://...">.
-// quickchart.io encodes Chart.js configs in GET URLs and returns
-// PNG images on the fly — no API key, no uploads, no CDN delays.
+// Markdown builder — uses Mermaid code blocks for charts
 // ─────────────────────────────────────────────────────────────
 
 function markdown(
@@ -170,28 +111,23 @@ function markdown(
   // ── Header ──────────────────────────────────────────────
   L.push('## 📊 RunnerLens\n');
 
-  // ── Stat cards ─────────────────────────────────────────
-  const statUrl = statCardChartUrl({
-    runner: `${sys.cpu_count} × ${sys.cpu_model}`,
-    runnerSub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`,
-    duration: fmtDuration(report.duration_seconds),
-    samples: report.sample_count,
-    cpuAvg: cpuAvgPct,
-    cpuPeak: cpuPeakPct,
-    memAvgPct,
-    memPeakPct,
-    memPeakGb: `${(report.memory.max / 1024).toFixed(1)} GB`,
-  });
-  L.push(`<img src="${statUrl}" alt="Stats" width="600" height="120" />\n`);
+  // ── Stat cards (markdown table) ─────────────────────────
+  L.push(statCards([
+    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
+    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, colorVar: 'accent-cyan' },
+    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, colorVar: 'accent-blue' },
+    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
+  ]));
+  L.push('');
 
   // ── Per-step bar chart ─────────────────────────────────
   if (report.steps && report.steps.length > 0) {
-    const barUrl = barChartUrl(
-      report.steps.map(s => ({ name: s.name, durationSec: s.duration_seconds })),
-    );
-    const h = Math.max(100, report.steps.length * 28 + 30);
     L.push('### Steps\n');
-    L.push(`<img src="${barUrl}" alt="Per-step durations" width="600" height="${h}" />\n`);
+    const chart = stepBarChart(
+      report.steps.map(s => ({ name: s.name, value: s.duration_seconds })),
+      { formatValue: fmtDuration },
+    );
+    if (chart) L.push(chart + '\n');
   }
 
   // ── Timeline ──────────────────────────────────────────
@@ -199,12 +135,12 @@ function markdown(
     const cpuV = samples.map(s => s.cpu.usage);
     const memV = samples.map(s => s.memory.usage_pct);
     if (cpuV.length >= 4) {
-      const tlUrl = timelineChartUrl(cpuV, memV, {
+      L.push('### Timeline\n');
+      const chart = timelineChart(cpuV, memV, {
         cpuAvg: cpuAvgPct,
         memAvg: memAvgPct,
       });
-      L.push('### Timeline\n');
-      L.push(`<img src="${tlUrl}" alt="CPU &amp; Memory Timeline" width="600" height="200" />\n`);
+      if (chart) L.push(chart + '\n');
     }
   }
 
@@ -231,29 +167,28 @@ function markdown(
 export function processMetrics(
   samples: MetricSample[],
   sysInfo: SystemInfo,
-  config: MonitorConfig,
+  _config: MonitorConfig,
   durationSec: number,
   steps?: StepMetrics[],
 ): {
   report: AggregatedReport;
-  charts: Record<string, string>;    // Raw SVG strings for upload
+  charts: Record<string, string>;
 } {
   const report = aggregate(samples, sysInfo, durationSec, steps);
-  if (config.summaryStyle === 'none') {
-    return { report, charts: {} };
-  }
-  const charts = generateSvgCharts(report, samples, config);
-  return { report, charts };
+  // With Mermaid, charts are inline in the markdown — no separate SVGs needed
+  return { report, charts: {} };
 }
 
 /**
- * Build the per-job markdown summary using quickchart.io image URLs.
- * GitHub Job Summary only renders <img src="https://..."> tags.
+ * Build the per-job markdown summary.
+ * Charts are rendered as inline Mermaid code blocks that GitHub
+ * renders natively — no image upload or external services needed.
  */
 export function buildJobMarkdown(
   report: AggregatedReport,
   samples: MetricSample[],
   config: MonitorConfig,
+  _uploadedUrls?: Record<string, string>,
 ): string {
   if (config.summaryStyle === 'none') return '';
   return markdown(report, samples, config);

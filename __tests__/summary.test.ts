@@ -155,7 +155,7 @@ describe('workflowMarkdown with SVG URLs (primary)', () => {
       },
     );
     expect(md).toContain('Workflow Summary');
-    expect(md).toContain('<table>');
+    expect(md).toContain('<table');
     expect(md).toContain('AMD EPYC');
     expect(md).toContain('<img');
     expect(md).toContain('test-cpu');
@@ -193,17 +193,16 @@ describe('workflowMarkdown fallback', () => {
       ],
       makeConfig(),
     );
-    expect(md).toContain('<table>');
+    expect(md).toContain('<table');
     expect(md).toContain('<td');
   });
 
-  it('renders timeline sparklines', () => {
+  it('renders timeline histograms', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('### Timeline');
-    expect(md).toContain('```');
-    expect(md).toContain('CPU');
-    expect(md).toContain('Memory');
-    expect(md).toMatch(/[▁▂▃▄▅▆▇█]/);
+    expect(md).toContain('CPU Usage');
+    expect(md).toContain('Memory Usage');
+    expect(md).toContain('bgcolor="#161b22"');
   });
 
   it('renders execution timeline when steps exist', () => {

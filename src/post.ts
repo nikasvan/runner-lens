@@ -169,15 +169,13 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Upload SVG charts (primary) or fall back to quickchart URLs ──
+    // ── Upload SVG charts → fall back to inline HTML charts ──
     let urls: Record<string, string> = {};
     if (config.githubToken && Object.keys(charts).length > 0) {
       urls = await uploadChartSvgs(charts, config.githubToken);
     }
-    // Fall back to quickchart.io URLs when SVG upload unavailable
-    if (Object.keys(urls).length === 0) {
-      urls = chartUrls;
-    }
+    // When SVG upload is unavailable, urls stays empty and
+    // buildJobMarkdown renders styled HTML tables instead.
     const markdown = buildJobMarkdown(report, samples, config, urls);
 
     if (markdown) {

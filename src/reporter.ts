@@ -4,7 +4,7 @@ import type {
 } from './types';
 import { stats, safeMax, safePct } from './stats';
 import { fmtDuration } from './charts';
-import { htmlStatCards, htmlBarChart, htmlTimeline } from './html-charts';
+import { htmlStatCards, htmlTimeline } from './html-charts';
 import {
   svgImg, statCards, timelineChart, stepBarChart,
 } from './svg-charts';
@@ -225,43 +225,11 @@ function markdown(
     L.push(`<img src="${chartUrls['stat-cards']}" alt="RunnerLens stats" width="600">\n`);
   } else {
     L.push(htmlStatCards([
-      { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}` },
-      { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples` },
-      { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%` },
-      { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB` },
+      { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, color: '#8b949e' },
+      { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, color: '#39d2c0' },
+      { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, color: '#58a6ff' },
+      { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, color: '#bc8cff' },
     ]) + '\n');
-  }
-
-  // ── Per-step breakdown ────────────────────────────────
-  if (report.steps && report.steps.length > 0) {
-    L.push('<details open><summary><strong>📋 Per-Step Breakdown</strong></summary>\n');
-
-    if (chartUrls['step-chart']) {
-      L.push(`\n<img src="${chartUrls['step-chart']}" alt="Per-step duration chart" width="600">\n`);
-    } else {
-      L.push(htmlBarChart(
-        report.steps.map((s) => ({ label: s.name, value: s.duration_seconds })),
-        { formatValue: fmtDuration },
-      ));
-      L.push('');
-    }
-
-    L.push('| # | Step | Duration | CPU avg | CPU peak | Mem avg | Mem peak |');
-    L.push('|---:|---|---:|---:|---:|---:|---:|');
-    for (const s of report.steps) {
-      const memAvgGB = (s.mem_avg_mb / 1024).toFixed(1);
-      const memMaxGB = (s.mem_max_mb / 1024).toFixed(1);
-      L.push(
-        `| ${s.number} ` +
-        `| ${s.name} ` +
-        `| ${fmtDuration(s.duration_seconds)} ` +
-        `| ${s.cpu_avg.toFixed(0)}% ` +
-        `| ${s.cpu_max.toFixed(0)}% ` +
-        `| ${memAvgGB} GB ` +
-        `| ${memMaxGB} GB |`,
-      );
-    }
-    L.push('\n</details>\n');
   }
 
   // ── Timeline ──────────────────────────────────────────

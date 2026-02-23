@@ -228,10 +228,10 @@ function workflowMarkdownWithImages(
     L.push(`<img src="${chartUrls['stat-cards']}" alt="Workflow stats" width="600">\n`);
   } else {
     L.push(htmlStatCards([
-      { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}` },
-      { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel },
-      { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%` },
-      { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB` },
+      { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}`, color: '#39d2c0' },
+      { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel, color: '#3fb950' },
+      { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%`, color: '#58a6ff' },
+      { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB`, color: '#bc8cff' },
     ]) + '\n');
   }
 
@@ -268,10 +268,10 @@ function workflowMarkdownFallback(jobs: JobReport[]): string {
   L.push('## 📊 RunnerLens — Workflow Summary\n');
 
   L.push(htmlStatCards([
-    { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}` },
-    { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel },
-    { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%` },
-    { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB` },
+    { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}`, color: '#39d2c0' },
+    { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel, color: '#3fb950' },
+    { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%`, color: '#58a6ff' },
+    { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB`, color: '#bc8cff' },
   ]) + '\n');
 
   const sorted = [...jobs].sort((a, b) =>
@@ -373,10 +373,8 @@ export async function runSummary(config: MonitorConfig): Promise<void> {
   if (config.githubToken && Object.keys(svgs).length > 0) {
     chartUrls = await uploadChartSvgs(svgs, config.githubToken);
   }
-  // Fall back to quickchart.io URLs when SVG upload unavailable
-  if (Object.keys(chartUrls).length === 0) {
-    chartUrls = generateWorkflowCharts(jobs);
-  }
+  // When SVG upload is unavailable, chartUrls stays empty and
+  // workflowMarkdown renders styled HTML tables instead.
 
   const md = workflowMarkdown(jobs, config, chartUrls);
   await core.summary.addRaw(md).write();

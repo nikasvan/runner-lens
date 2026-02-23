@@ -180,7 +180,7 @@ describe('processMetrics', () => {
 
     const md = buildJobMarkdown(report, [s1, s2], makeConfig());
     expect(md).toContain('RunnerLens');
-    expect(md).toContain('<table>'); // HTML stat cards fallback
+    expect(md).toContain('<table'); // HTML stat cards fallback
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
@@ -358,7 +358,7 @@ describe('collector stats', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('per-step markdown', () => {
-  it('renders per-step table in fallback markdown when steps provided', () => {
+  it('does not render per-step breakdown in markdown', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const steps: StepMetrics[] = [
@@ -367,9 +367,7 @@ describe('per-step markdown', () => {
     ];
     const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
     const md = buildJobMarkdown(report, [s1, s2], makeConfig());
-    expect(md).toContain('Per-Step Breakdown');
-    expect(md).toContain('Checkout');
-    expect(md).toContain('Build');
+    expect(md).not.toContain('Per-Step Breakdown');
   });
 
   it('generates step-chart SVG and URL when steps provided', () => {

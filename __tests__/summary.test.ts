@@ -125,29 +125,30 @@ describe('generateWorkflowCharts (quickchart fallback)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// workflowMarkdown — SVG data URI images
+// workflowMarkdown — SVG mode (with chart URLs)
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// workflowMarkdown — always renders inline SVG charts
 // ─────────────────────────────────────────────────────────────
 
 describe('workflowMarkdown', () => {
-  it('renders SVG data URI img tags', () => {
+  it('renders inline SVG charts', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    expect(md).toContain('<img');
-    expect(md).toContain('data:image/svg+xml;base64,');
+    expect(md).toContain('<svg');
+    expect(md).toContain('AMD EPYC');
   });
 
-  it('renders header and runner info in stat cards SVG', () => {
-    const jobs = [makeJob('build'), makeJob('test')];
-    const svgs = generateWorkflowSvgs(jobs);
-    const md = workflowMarkdown(jobs, makeConfig(), svgs);
+  it('renders header and runner info in stat cards', () => {
+    const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    // Runner info is embedded in the base64-encoded SVG
-    expect(svgs['stat-cards']).toContain('AMD EPYC');
-    expect(svgs['stat-cards']).toContain('7.0 GB RAM');
-    expect(svgs['stat-cards']).toContain('Linux');
+    expect(md).toContain('AMD EPYC');
+    expect(md).toContain('7.0 GB RAM');
+    expect(md).toContain('Linux');
   });
 
-  it('renders CPU Usage and Memory Usage sections', () => {
+  it('renders stat cards as inline SVG', () => {
     const md = workflowMarkdown(
       [
         makeJob('build', { cpu: { avg: 60, max: 92, min: 10, p50: 55, p95: 85, p99: 90, latest: 50 }, sample_count: 30 }),
@@ -155,17 +156,16 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    expect(md).toContain('### CPU Usage');
-    expect(md).toContain('### Memory Usage');
+    expect(md).toContain('<svg');
+    expect(md).toContain('Avg CPU');
   });
 
-  it('renders CPU and Memory timeline img tags', () => {
+  it('renders CPU and Memory usage charts', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('### CPU Usage');
+    expect(md).toContain('CPU Usage');
     expect(md).toContain('### Memory Usage');
-    // Count img tags: stat-cards + cpu + mem = 3
-    const imgCount = (md.match(/<img /g) || []).length;
-    expect(imgCount).toBe(3);
+    expect(md).toContain('Memory Usage');
   });
 
   it('renders execution timeline when steps exist', () => {
@@ -179,27 +179,25 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('### Execution Timeline');
-    // 4 img tags: stat-cards + cpu + mem + waterfall
-    const imgCount = (md.match(/<img /g) || []).length;
-    expect(imgCount).toBe(4);
+    expect(md).toContain('Checkout');
+    expect(md).toContain('Compile');
   });
 
   it('sorts jobs chronologically in execution timeline', () => {
     const steps = [
       { name: 'Run', number: 1, duration_seconds: 30, cpu_avg: 50, cpu_max: 80, mem_avg_mb: 2000, mem_max_mb: 3000, sample_count: 10 },
     ];
-    const jobs = [
-      makeJob('z-test', { started_at: '2023-11-14T22:15:00Z', steps }),
-      makeJob('a-build', { started_at: '2023-11-14T22:10:00Z', steps }),
-    ];
-    const svgs = generateWorkflowSvgs(jobs);
-    // The waterfall SVG should contain both job names (embedded in the SVG)
-    expect(svgs['waterfall']).toBeDefined();
-    expect(svgs['waterfall']).toContain('a-build');
-    expect(svgs['waterfall']).toContain('z-test');
-    // a-build should appear before z-test in the SVG source
-    const buildIdx = svgs['waterfall'].indexOf('a-build');
-    const testIdx = svgs['waterfall'].indexOf('z-test');
+    const md = workflowMarkdown(
+      [
+        makeJob('z-test', { started_at: '2023-11-14T22:15:00Z', steps }),
+        makeJob('a-build', { started_at: '2023-11-14T22:10:00Z', steps }),
+      ],
+      makeConfig(),
+    );
+    const buildIdx = md.indexOf('a-build');
+    const testIdx = md.indexOf('z-test');
+    expect(buildIdx).toBeGreaterThan(-1);
+    expect(testIdx).toBeGreaterThan(-1);
     expect(buildIdx).toBeLessThan(testIdx);
   });
 
@@ -210,14 +208,12 @@ describe('workflowMarkdown', () => {
   });
 
   it('handles single job correctly', () => {
-    const jobs = [makeJob('deploy')];
-    const svgs = generateWorkflowSvgs(jobs);
-    // "1 job" appears in the stat-cards SVG
-    expect(svgs['stat-cards']).toContain('1 job');
-    expect(svgs['stat-cards']).not.toContain('1 jobs');
+    const md = workflowMarkdown([makeJob('deploy')], makeConfig());
+    expect(md).toContain('1 job');
+    expect(md).not.toContain('1 jobs');
   });
 
-  it('omits CPU/Memory sections when no timeline data exists', () => {
+  it('omits timeline when no timeline data exists', () => {
     const md = workflowMarkdown(
       [makeJob('build', { timeline: undefined })],
       makeConfig(),

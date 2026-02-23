@@ -156,15 +156,14 @@ describe('processMetrics', () => {
     expect(charts['stat-cards']).toContain('AMD EPYC');
   });
 
-  it('always renders HTML tables (no img tags)', () => {
+  it('renders inline SVG charts in job markdown', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
 
     const md = buildJobMarkdown(report, [s1, s2], makeConfig());
     expect(md).toContain('RunnerLens');
-    expect(md).toContain('<table');
-    expect(md).not.toContain('<img');
+    expect(md).toContain('<svg');
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {

@@ -10,7 +10,7 @@ import type { MonitorConfig, JobReport, AggregatedReport } from './types';
 import { safePct } from './stats';
 import { fmtDuration } from './charts';
 import {
-  svgImg, svgToDataImg, statCards, workflowTimelineChart, waterfallChart,
+  svgImg, statCards, workflowTimelineChart, waterfallChart,
   type TimelineSegment,
 } from './svg-charts';
 import { statCardChartUrl, waterfallChartUrl, workflowTimelineUrl } from './quickchart';
@@ -210,31 +210,36 @@ export function generateWorkflowCharts(jobs: JobReport[]): Record<string, string
 }
 
 // ─────────────────────────────────────────────────────────────
-// Build workflow markdown with SVG data URI images
+// Build workflow markdown with inline SVG charts
 // ─────────────────────────────────────────────────────────────
 
-function workflowMarkdownHtml(_jobs: JobReport[], svgs: Record<string, string>): string {
+function workflowMarkdownSvg(jobs: JobReport[]): string {
   const L: string[] = [];
+  const svgs = generateWorkflowSvgs(jobs);
 
   L.push('## 📊 RunnerLens — Workflow Summary\n');
 
+  // Stat cards
   if (svgs['stat-cards']) {
-    L.push(svgToDataImg(svgs['stat-cards'], 'Workflow stats') + '\n');
+    L.push(svgs['stat-cards'] + '\n');
   }
 
+  // CPU Usage
   if (svgs['cpu-timeline']) {
     L.push('### CPU Usage\n');
-    L.push(svgToDataImg(svgs['cpu-timeline'], 'CPU Timeline') + '\n');
+    L.push(svgs['cpu-timeline'] + '\n');
   }
 
+  // Memory Usage
   if (svgs['mem-timeline']) {
     L.push('### Memory Usage\n');
-    L.push(svgToDataImg(svgs['mem-timeline'], 'Memory Timeline') + '\n');
+    L.push(svgs['mem-timeline'] + '\n');
   }
 
+  // Execution Timeline (Waterfall)
   if (svgs['waterfall']) {
     L.push('### Execution Timeline\n');
-    L.push(svgToDataImg(svgs['waterfall'], 'Execution Timeline') + '\n');
+    L.push(svgs['waterfall'] + '\n');
   }
 
   L.push('---');
@@ -251,17 +256,15 @@ function workflowMarkdownHtml(_jobs: JobReport[], svgs: Record<string, string>):
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Build workflow-level markdown using SVG data URI images.
- * SVGs are base64-encoded and embedded as <img> tags for
- * reliable rendering in GitHub Job Summary.
+ * Build workflow-level markdown using inline SVG charts.
+ * SVG charts are resolved to static colors and stripped of <style>
+ * blocks so they render correctly in GitHub Job Summary.
  */
 export function workflowMarkdown(
   jobs: JobReport[],
   _config?: MonitorConfig,
-  svgs?: Record<string, string>,
 ): string {
-  const resolvedSvgs = svgs ?? generateWorkflowSvgs(jobs);
-  return workflowMarkdownHtml(jobs, resolvedSvgs);
+  return workflowMarkdownSvg(jobs);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -283,12 +286,13 @@ export async function runSummary(config: MonitorConfig): Promise<void> {
 
   core.info(`RunnerLens: found ${jobs.length} job report(s): ${jobs.map((j) => j.jobName).join(', ')}`);
 
-  // Generate SVG charts for both upload and embedding
+  // Upload SVG charts (for external reference / artifacts)
   const svgs = generateWorkflowSvgs(jobs);
   if (config.githubToken && Object.keys(svgs).length > 0) {
     await uploadChartSvgs(svgs, config.githubToken);
   }
-  const md = workflowMarkdown(jobs, config, svgs);
+  // Build workflow markdown with inline SVG charts
+  const md = workflowMarkdown(jobs, config);
   await core.summary.addRaw(md).write();
   core.info('RunnerLens: workflow summary written to Job Summary');
 

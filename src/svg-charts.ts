@@ -61,15 +61,6 @@ export function svgImg(svg: string, _alt: string, _width?: number, _height?: num
 }
 
 /**
- * Convert a resolved SVG string to a base64-encoded data URI <img> tag.
- * Use this to embed SVGs in GitHub Job Summary markdown.
- */
-export function svgToDataImg(resolvedSvg: string, alt: string, width = 600): string {
-  const b64 = Buffer.from(resolvedSvg, 'utf-8').toString('base64');
-  return `<img src="data:image/svg+xml;base64,${b64}" alt="${alt}" width="${width}" />`;
-}
-
-/**
  * Returns an empty string — the <style> block is no longer used.
  * CSS variables are resolved to static values by svgImg() at embed time.
  * Kept as a function so chart builders can still call it in <defs>.

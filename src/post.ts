@@ -173,8 +173,7 @@ async function run(): Promise<void> {
     if (config.githubToken && Object.keys(charts).length > 0) {
       await uploadChartSvgs(charts, config.githubToken);
     }
-    // Always use HTML tables for Job Summary — GitHub strips SVG
-    // features (<style>, <path>, etc.) making <img> tags unreliable.
+    // Build per-job markdown with inline SVG charts
     const markdown = buildJobMarkdown(report, samples, config);
 
     if (markdown) {

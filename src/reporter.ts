@@ -4,7 +4,6 @@ import type {
 } from './types';
 import { stats, safeMax, safePct } from './stats';
 import { fmtDuration } from './charts';
-import { htmlStatCards, htmlTimeline } from './html-charts';
 import {
   svgImg, statCards, timelineChart, stepBarChart,
 } from './svg-charts';
@@ -153,39 +152,27 @@ function markdown(
   samples: MetricSample[],
   config: MonitorConfig,
 ): string {
-  const minimal = config.summaryStyle === 'minimal';
   const L: string[] = [];
-
-  const cpuAvgPct = report.cpu.avg;
-  const cpuPeakPct = report.cpu.max;
-  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
-  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
-
-  const sys = report.system;
+  const charts = generateSvgCharts(report, samples, config);
 
   // ── Header ──────────────────────────────────────────────
   L.push('## 📊 RunnerLens\n');
 
-  // ── Stat cards ─────────────────────────────────────────
-  L.push(htmlStatCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, color: '#8b949e' },
-    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, color: '#39d2c0' },
-    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, color: '#58a6ff' },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, color: '#bc8cff' },
-  ]) + '\n');
+  // ── Stat cards (SVG) ───────────────────────────────────
+  if (charts['stat-cards']) {
+    L.push(charts['stat-cards'] + '\n');
+  }
 
-  // ── Timeline ──────────────────────────────────────────
-  if (!minimal) {
-    const cpuV = samples.map((s) => s.cpu.usage);
-    const memV = samples.map((s) => s.memory.usage_pct);
-    if (cpuV.length >= 4) {
-      L.push('<details open><summary><strong>📈 Timeline</strong></summary>\n');
-      L.push(htmlTimeline([
-        { label: 'CPU', values: cpuV, avg: `${cpuAvgPct.toFixed(0)}% avg` },
-        { label: 'Memory', values: memV, avg: `${memAvgPct.toFixed(0)}% avg` },
-      ]));
-      L.push('\n</details>\n');
-    }
+  // ── Per-step bar chart (SVG) ──────────────────────────
+  if (charts['step-chart']) {
+    L.push('### Steps\n');
+    L.push(charts['step-chart'] + '\n');
+  }
+
+  // ── Timeline (SVG) ────────────────────────────────────
+  if (charts['timeline']) {
+    L.push('### Timeline\n');
+    L.push(charts['timeline'] + '\n');
   }
 
   // ── Footer ─────────────────────────────────────────────
@@ -227,9 +214,9 @@ export function processMetrics(
 }
 
 /**
- * Build the per-job markdown summary using HTML tables.
- * GitHub strips SVG features so we always render bgcolor-based
- * HTML tables that display reliably in Job Summary.
+ * Build the per-job markdown summary using inline SVG charts.
+ * SVG charts are resolved to static colors and stripped of <style>
+ * blocks so they render correctly in GitHub Job Summary.
  */
 export function buildJobMarkdown(
   report: AggregatedReport,

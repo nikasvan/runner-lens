@@ -40,13 +40,7 @@ export async function downloadJobReports(): Promise<JobReport[]> {
         fs.readFileSync(reportPath, 'utf-8'),
       );
       const jobName = art.name.slice(ARTIFACT_PREFIX.length);
-
-      const summaryPath = path.join(downloadPath, 'summary.md');
-      const summaryMd = fs.existsSync(summaryPath)
-        ? fs.readFileSync(summaryPath, 'utf-8')
-        : undefined;
-
-      jobs.push({ jobName, report, summaryMd });
+      jobs.push({ jobName, report });
     } catch (e) {
       core.warning(`RunnerLens: failed to download artifact "${art.name}" — ${e}`);
     }
@@ -164,17 +158,6 @@ export function workflowMarkdown(jobs: JobReport[], _config?: MonitorConfig): st
     if (wfSvg) {
       L.push('### Execution Timeline\n');
       L.push(svgImg(wfSvg, 'Execution timeline', 600) + '\n');
-    }
-  }
-
-  // ── Per-Job Details (from uploaded summaries) ──────────
-  const jobsWithSummary = sorted.filter(j => j.summaryMd);
-  if (jobsWithSummary.length > 0) {
-    L.push('### Per-Job Details\n');
-    for (const j of jobsWithSummary) {
-      L.push(`<details><summary><strong>${escapeHtml(j.jobName)}</strong></summary>\n`);
-      L.push(j.summaryMd!);
-      L.push('\n</details>\n');
     }
   }
 

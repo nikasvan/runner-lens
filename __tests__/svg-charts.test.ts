@@ -4,37 +4,36 @@
 
 import { svgImg, timelineChart, stepBarChart, workflowTimelineChart, waterfallChart, statCards } from '../src/svg-charts';
 
-/** Extract and decode percent-encoded SVG from an <img> data URI. */
-function decodeSvgImg(img: string): string {
-  const encoded = img.match(/data:image\/svg\+xml,([^"]+)/)?.[1] ?? '';
-  return decodeURIComponent(encoded);
-}
-
 // ── svgImg ──────────────────────────────────────────────────
 
 describe('svgImg', () => {
   const trivialSvg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
 
-  it('produces an <img> tag with percent-encoded data URI', () => {
-    const img = svgImg(trivialSvg, 'test');
-    expect(img).toMatch(/^<img src="data:image\/svg\+xml,[^"]+" alt="test" \/>$/);
+  it('returns inline SVG (not data URI)', () => {
+    const result = svgImg(trivialSvg, 'test');
+    expect(result).toMatch(/^<svg /);
+    expect(result).not.toContain('data:image/svg+xml');
+    expect(result).not.toContain('<img');
   });
 
-  it('decodes back to the original SVG', () => {
-    const img = svgImg(trivialSvg, 'test');
-    expect(decodeSvgImg(img)).toBe(trivialSvg);
+  it('resolves CSS variables to static colors', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="var(--cpu-stroke)"/></svg>';
+    const result = svgImg(svg, 'test');
+    expect(result).toContain('fill="#58a6ff"');
+    expect(result).not.toContain('var(--');
   });
 
-  it('includes width and height attributes when provided', () => {
-    const img = svgImg(trivialSvg, 'test', 200, 100);
-    expect(img).toContain('width="200"');
-    expect(img).toContain('height="100"');
+  it('strips <style> blocks', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><defs><style>text{}</style></defs></svg>';
+    const result = svgImg(svg, 'test');
+    expect(result).not.toContain('<style>');
   });
 
-  it('omits dimension attributes when not provided', () => {
-    const img = svgImg(trivialSvg, 'test');
-    expect(img).not.toContain('width=');
-    expect(img).not.toContain('height=');
+  it('injects font-family into text elements', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10">Hi</text></svg>';
+    const result = svgImg(svg, 'test');
+    expect(result).toContain('font-family=');
+    expect(result).toContain('monospace');
   });
 });
 
@@ -84,9 +83,9 @@ describe('timelineChart', () => {
     expect(svg).toContain('<svg');
   });
 
-  it('includes dark mode media query', () => {
+  it('uses CSS variable references for theming', () => {
     const svg = timelineChart([10, 20], [30, 40]);
-    expect(svg).toContain('prefers-color-scheme: light');
+    expect(svg).toContain('var(--');
   });
 
   it('works when only one series has data', () => {
@@ -152,9 +151,9 @@ describe('stepBarChart', () => {
     expect(svg).toContain('2m 5s');
   });
 
-  it('includes dark mode media query', () => {
+  it('uses CSS variable references for theming', () => {
     const svg = stepBarChart([{ name: 'X', value: 1 }]);
-    expect(svg).toContain('prefers-color-scheme: light');
+    expect(svg).toContain('var(--');
   });
 });
 
@@ -281,12 +280,12 @@ describe('workflowTimelineChart', () => {
     expect(svg).toContain('CPU Usage');
   });
 
-  it('includes dark mode media query', () => {
+  it('uses CSS variable references for theming', () => {
     const svg = workflowTimelineChart(
       [{ label: 'job', values: [10, 20, 30] }],
       baseOpts,
     );
-    expect(svg).toContain('prefers-color-scheme: light');
+    expect(svg).toContain('var(--');
   });
 
   it('handles many data points without issue', () => {
@@ -402,9 +401,9 @@ describe('waterfallChart', () => {
     expect(svg).toContain('&lt;');
   });
 
-  it('includes dark mode media query', () => {
+  it('uses CSS variable references for theming', () => {
     const svg = waterfallChart([{ label: 'X', startSec: 0, durationSec: 1 }]);
-    expect(svg).toContain('prefers-color-scheme: light');
+    expect(svg).toContain('var(--');
   });
 
   it('positions parallel steps at same x offset', () => {
@@ -458,9 +457,9 @@ describe('statCards', () => {
     expect(svg).toContain('var(--bg-card)');
   });
 
-  it('includes dark mode media query', () => {
+  it('uses CSS variable references for theming', () => {
     const svg = statCards([{ label: 'X', value: '1' }]);
-    expect(svg).toContain('prefers-color-scheme: light');
+    expect(svg).toContain('var(--');
   });
 
   it('renders 4 cards without issue', () => {

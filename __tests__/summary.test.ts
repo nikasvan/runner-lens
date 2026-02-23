@@ -21,7 +21,6 @@ function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
     sampleInterval: 3,
     summaryStyle: 'full',
     maxSizeMb: 100,
-    uploadArtifact: false,
     apiKey: '',
     apiEndpoint: 'https://api.runnerlens.com',
     githubToken: '',
@@ -62,13 +61,6 @@ function makeJob(name: string, overrides: Partial<AggregatedReport> = {}): JobRe
   return { jobName: name, report: makeReport(overrides) };
 }
 
-/** Extract and decode percent-encoded SVG from markdown by alt text. */
-function decodeSvgFromMd(md: string, alt: string): string {
-  const re = new RegExp(`data:image/svg\\+xml,([^"]+)" alt="${alt}"`);
-  const encoded = md.match(re)?.[1] ?? '';
-  return decodeURIComponent(encoded);
-}
-
 // ─────────────────────────────────────────────────────────────
 // workflowMarkdown
 // ─────────────────────────────────────────────────────────────
@@ -77,14 +69,13 @@ describe('workflowMarkdown', () => {
   it('renders header and runner info in stat cards', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    // Runner info is inside SVG stat card
-    const svg = decodeSvgFromMd(md, 'Summary stats');
-    expect(svg).toContain('AMD EPYC');
-    expect(svg).toContain('7.0 GB RAM');
-    expect(svg).toContain('Linux');
+    // Runner info is inside inline SVG stat card
+    expect(md).toContain('AMD EPYC');
+    expect(md).toContain('7.0 GB RAM');
+    expect(md).toContain('Linux');
   });
 
-  it('renders stat cards with aggregate metrics', () => {
+  it('renders stat cards with aggregate metrics as inline SVG', () => {
     const md = workflowMarkdown(
       [
         makeJob('build', { cpu: { avg: 60, max: 92, min: 10, p50: 55, p95: 85, p99: 90, latest: 50 }, sample_count: 30 }),
@@ -92,17 +83,20 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    expect(md).toContain('alt="Summary stats"');
+    // Inline SVGs, no data URIs
+    expect(md).toContain('<svg');
+    expect(md).not.toContain('data:image/svg+xml');
   });
 
-  it('renders CPU and Memory timeline charts with SVG', () => {
+  it('renders CPU and Memory timeline charts with inline SVG', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('### CPU Usage');
     expect(md).toContain('### Memory Usage');
-    expect(md).toContain('data:image/svg+xml,');
+    expect(md).toContain('<svg');
+    expect(md).not.toContain('data:image/svg+xml');
   });
 
-  it('renders execution timeline table when steps exist', () => {
+  it('renders execution timeline when steps exist', () => {
     const md = workflowMarkdown(
       [makeJob('build', {
         steps: [
@@ -113,7 +107,7 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('### Execution Timeline');
-    expect(md).toContain('alt="Execution timeline"');
+    expect(md).toContain('<svg');
   });
 
   it('sorts jobs chronologically in execution timeline', () => {
@@ -127,11 +121,9 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    // Waterfall chart is rendered as SVG — decode and verify a-build appears before z-test
-    const svg = decodeSvgFromMd(md, 'Execution timeline');
-    expect(svg.length).toBeGreaterThan(0);
-    const buildIdx = svg.indexOf('a-build');
-    const testIdx = svg.indexOf('z-test');
+    // Inline SVG should contain both job names in chronological order
+    const buildIdx = md.indexOf('a-build');
+    const testIdx = md.indexOf('z-test');
     expect(buildIdx).toBeGreaterThan(-1);
     expect(testIdx).toBeGreaterThan(-1);
     expect(buildIdx).toBeLessThan(testIdx);
@@ -145,10 +137,9 @@ describe('workflowMarkdown', () => {
 
   it('handles single job correctly', () => {
     const md = workflowMarkdown([makeJob('deploy')], makeConfig());
-    // Job count is inside SVG stat card — decode and verify singular
-    const svg = decodeSvgFromMd(md, 'Summary stats');
-    expect(svg).toContain('1 job');
-    expect(svg).not.toContain('1 jobs');
+    // Job count is inside inline SVG stat card
+    expect(md).toContain('1 job');
+    expect(md).not.toContain('1 jobs');
   });
 
   it('omits charts when no timeline data exists', () => {

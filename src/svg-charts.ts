@@ -7,52 +7,66 @@ import { fmtDuration } from './charts';
 // ── Internal helpers ────────────────────────────────────────
 
 /**
- * Encode an SVG string as a data URI.
- * Uses percent-encoding rather than base64 for better compatibility
- * with GitHub Job Summary's markdown sanitizer.
+ * Dark-mode color map — resolved values for CSS custom properties.
+ * GitHub Job Summary strips <style> tags from inline SVGs, so we
+ * resolve var(--name) references to static color values at build time.
  */
-function svgToDataUri(svg: string): string {
-  const mini = svg.replace(/\n\s*/g, '').replace(/\s{2,}/g, ' ');
-  return `data:image/svg+xml,${encodeURIComponent(mini)}`;
+const THEME: Record<string, string> = {
+  '--bg': '#0d1117',
+  '--bg-card': '#161b22',
+  '--fg': '#e6edf3',
+  '--grid': '#30363d',
+  '--grid-subtle': '#21262d',
+  '--muted': '#8b949e',
+  '--cpu-stroke': '#58a6ff',
+  '--cpu-fill': 'rgba(88,166,255,0.25)',
+  '--mem-stroke': '#bc8cff',
+  '--mem-fill': 'rgba(188,140,255,0.25)',
+  '--bar-fill': '#58a6ff',
+  '--bar-bg': '#21262d',
+  '--accent-blue': '#58a6ff',
+  '--accent-purple': '#bc8cff',
+  '--accent-cyan': '#39d2c0',
+  '--accent-green': '#3fb950',
+  '--group-band': 'rgba(255,255,255,0.02)',
+};
+
+/** Resolve all var(--name) references in an SVG string to static colors. */
+function resolveVars(svg: string): string {
+  return svg.replace(/var\(--([a-z-]+)\)/g, (match, name) => {
+    return THEME[`--${name}`] ?? match;
+  });
 }
 
-/** Wrap an SVG string in an <img> tag with a data URI. */
-export function svgImg(svg: string, alt: string, width?: number, height?: number): string {
-  const uri = svgToDataUri(svg);
-  const dims = [
-    width ? `width="${width}"` : '',
-    height ? `height="${height}"` : '',
-  ].filter(Boolean).join(' ');
-  return `<img src="${uri}" alt="${alt}"${dims ? ` ${dims}` : ''} />`;
+const MONO_FONT = 'ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,Liberation Mono,monospace';
+
+/** Inject font-family into <text> elements (GitHub strips <style> tags). */
+function injectFonts(svg: string): string {
+  return svg.replace(/<text /g, `<text font-family="${MONO_FONT}" `);
 }
 
-/** CSS custom properties — dark by default, light via media query (matches GitHub). */
+/**
+ * Embed an SVG inline for GitHub Job Summary.
+ * Resolves CSS variables to static values and strips the <style> block
+ * so the SVG renders correctly after GitHub's HTML sanitizer runs.
+ */
+export function svgImg(svg: string, _alt: string, _width?: number, _height?: number): string {
+  let resolved = resolveVars(svg);
+  resolved = injectFonts(resolved);
+  // Strip <style> blocks (GitHub sanitizer removes them anyway)
+  resolved = resolved.replace(/<style>[\s\S]*?<\/style>/g, '');
+  // Clean up empty <defs></defs>
+  resolved = resolved.replace(/<defs>\s*<\/defs>/g, '');
+  return resolved;
+}
+
+/**
+ * Returns an empty string — the <style> block is no longer used.
+ * CSS variables are resolved to static values by svgImg() at embed time.
+ * Kept as a function so chart builders can still call it in <defs>.
+ */
 function themeStyles(): string {
-  return `<style>
-      :root {
-        --bg: #0d1117; --bg-card: #161b22; --fg: #e6edf3;
-        --grid: #30363d; --grid-subtle: #21262d; --muted: #8b949e;
-        --cpu-stroke: #58a6ff; --cpu-fill: rgba(88,166,255,0.25);
-        --mem-stroke: #bc8cff; --mem-fill: rgba(188,140,255,0.25);
-        --bar-fill: #58a6ff; --bar-bg: #21262d;
-        --accent-blue: #58a6ff; --accent-purple: #bc8cff;
-        --accent-cyan: #39d2c0; --accent-green: #3fb950;
-        --group-band: rgba(255,255,255,0.02);
-      }
-      @media (prefers-color-scheme: light) {
-        :root {
-          --bg: #ffffff; --bg-card: #f6f8fa; --fg: #24292f;
-          --grid: #d0d7de; --grid-subtle: #eaeef2; --muted: #656d76;
-          --cpu-stroke: #0969da; --cpu-fill: rgba(9,105,218,0.25);
-          --mem-stroke: #8250df; --mem-fill: rgba(130,80,223,0.25);
-          --bar-fill: #0969da; --bar-bg: #eaeef2;
-          --accent-blue: #0969da; --accent-purple: #8250df;
-          --accent-cyan: #0598bc; --accent-green: #1a7f37;
-          --group-band: rgba(0,0,0,0.03);
-        }
-      }
-      text { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
-    </style>`;
+  return '';
 }
 
 /** Down-sample values to ≤ width points using linear interpolation. */

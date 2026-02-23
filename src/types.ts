@@ -64,7 +64,6 @@ export interface MonitorConfig {
   sampleInterval: number;
   summaryStyle: 'full' | 'compact' | 'minimal' | 'none';
   maxSizeMb: number;
-  uploadArtifact: boolean;
   apiKey: string;
   apiEndpoint: string;
   githubToken: string;
@@ -116,7 +115,6 @@ export interface AggregatedReport {
 export interface JobReport {
   jobName: string;
   report: AggregatedReport;
-  summaryMd?: string;
 }
 
 export interface IngestPayload {

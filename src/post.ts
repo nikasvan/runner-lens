@@ -194,16 +194,7 @@ async function run(): Promise<void> {
         fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
 
         const files = [reportFile];
-
-        // Save rendered markdown (with SVG charts) so summarize mode
-        // can include per-job charts in the workflow summary.
-        if (markdown) {
-          const summaryFile = path.join(artifactDir, 'summary.md');
-          fs.writeFileSync(summaryFile, markdown);
-          files.push(summaryFile);
-        }
-
-        if (config.uploadArtifact) {
+        if (core.getInput('upload-artifact') === 'true') {
           const samplesFile = path.join(artifactDir, 'samples.json');
           fs.writeFileSync(samplesFile, JSON.stringify(samples, null, 2));
           files.push(samplesFile);

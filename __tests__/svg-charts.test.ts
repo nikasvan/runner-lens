@@ -9,31 +9,47 @@ import { svgImg, timelineChart, stepBarChart, workflowTimelineChart, waterfallCh
 describe('svgImg', () => {
   const trivialSvg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
 
-  it('returns inline SVG (not data URI)', () => {
+  /** Decode the base64 payload inside the <img> tag for inspection. */
+  function decodeSvg(imgTag: string): string {
+    const m = imgTag.match(/base64,([^"]+)/);
+    return m ? Buffer.from(m[1], 'base64').toString('utf8') : '';
+  }
+
+  it('returns a base64 <img> data URI', () => {
     const result = svgImg(trivialSvg, 'test');
-    expect(result).toMatch(/^<svg /);
-    expect(result).not.toContain('data:image/svg+xml');
-    expect(result).not.toContain('<img');
+    expect(result).toMatch(/^<img /);
+    expect(result).toContain('data:image/svg+xml;base64,');
+    expect(result).toContain('alt="test"');
   });
 
   it('resolves CSS variables to static colors', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="var(--cpu-stroke)"/></svg>';
     const result = svgImg(svg, 'test');
-    expect(result).toContain('fill="#58a6ff"');
-    expect(result).not.toContain('var(--');
+    const decoded = decodeSvg(result);
+    expect(decoded).toContain('fill="#58a6ff"');
+    expect(decoded).not.toContain('var(--');
   });
 
   it('strips <style> blocks', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><defs><style>text{}</style></defs></svg>';
     const result = svgImg(svg, 'test');
-    expect(result).not.toContain('<style>');
+    const decoded = decodeSvg(result);
+    expect(decoded).not.toContain('<style>');
   });
 
   it('injects font-family into text elements', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10">Hi</text></svg>';
     const result = svgImg(svg, 'test');
-    expect(result).toContain('font-family=');
-    expect(result).toContain('monospace');
+    const decoded = decodeSvg(result);
+    expect(decoded).toContain('font-family=');
+    expect(decoded).toContain('monospace');
+  });
+
+  it('includes width and height from SVG root', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200"></svg>';
+    const result = svgImg(svg, 'chart');
+    expect(result).toContain('width="600"');
+    expect(result).toContain('height="200"');
   });
 });
 

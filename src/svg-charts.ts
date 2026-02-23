@@ -46,18 +46,29 @@ function injectFonts(svg: string): string {
 }
 
 /**
- * Embed an SVG inline for GitHub Job Summary.
+ * Embed an SVG as a base64 <img> tag for GitHub Job Summary.
+ * GitHub's HTML sanitizer strips inline <svg> elements, so we encode
+ * the SVG as a data-URI and use an <img> tag which GitHub allows.
  * Resolves CSS variables to static values and strips the <style> block
- * so the SVG renders correctly after GitHub's HTML sanitizer runs.
+ * before encoding.
  */
-export function svgImg(svg: string, _alt: string, _width?: number, _height?: number): string {
+export function svgImg(svg: string, alt: string, _width?: number, _height?: number): string {
   let resolved = resolveVars(svg);
   resolved = injectFonts(resolved);
   // Strip <style> blocks (GitHub sanitizer removes them anyway)
   resolved = resolved.replace(/<style>[\s\S]*?<\/style>/g, '');
   // Clean up empty <defs></defs>
   resolved = resolved.replace(/<defs>\s*<\/defs>/g, '');
-  return resolved;
+
+  // Extract width/height from the SVG root element for the img tag
+  const wMatch = resolved.match(/width="(\d+)"/);
+  const hMatch = resolved.match(/height="(\d+)"/);
+  const w = _width ?? (wMatch ? Number(wMatch[1]) : undefined);
+  const h = _height ?? (hMatch ? Number(hMatch[1]) : undefined);
+
+  const b64 = Buffer.from(resolved).toString('base64');
+  const sizeAttrs = (w ? ` width="${w}"` : '') + (h ? ` height="${h}"` : '');
+  return `<img src="data:image/svg+xml;base64,${b64}" alt="${alt}"${sizeAttrs} />`;
 }
 
 /**

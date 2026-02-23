@@ -11,6 +11,12 @@ import type {
   MonitorConfig, AggregatedReport, JobReport,
 } from '../src/types';
 
+/** Decode all base64 SVG <img> tags in markdown and return the raw SVG text. */
+function decodeSvgsInMarkdown(md: string): string {
+  const matches = [...md.matchAll(/base64,([^"]+)/g)];
+  return matches.map(m => Buffer.from(m[1], 'base64').toString('utf8')).join('\n');
+}
+
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
@@ -69,16 +75,16 @@ describe('generateWorkflowSvgs', () => {
   it('generates stat-cards SVG', () => {
     const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
     expect(svgs['stat-cards']).toBeDefined();
-    expect(svgs['stat-cards']).toContain('<svg');
-    expect(svgs['stat-cards']).toContain('AMD EPYC');
+    expect(svgs['stat-cards']).toContain('<img ');
+    expect(decodeSvgsInMarkdown(svgs['stat-cards'])).toContain('AMD EPYC');
   });
 
   it('generates CPU and memory timeline SVGs', () => {
     const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
     expect(svgs['cpu-timeline']).toBeDefined();
-    expect(svgs['cpu-timeline']).toContain('<svg');
+    expect(svgs['cpu-timeline']).toContain('<img ');
     expect(svgs['mem-timeline']).toBeDefined();
-    expect(svgs['mem-timeline']).toContain('<svg');
+    expect(svgs['mem-timeline']).toContain('<img ');
   });
 
   it('generates waterfall SVG when steps exist', () => {
@@ -89,7 +95,7 @@ describe('generateWorkflowSvgs', () => {
       ],
     })]);
     expect(svgs['waterfall']).toBeDefined();
-    expect(svgs['waterfall']).toContain('<svg');
+    expect(svgs['waterfall']).toContain('<img ');
   });
 
   it('omits waterfall when no steps exist', () => {
@@ -136,16 +142,16 @@ describe('workflowMarkdown', () => {
   it('renders inline SVG charts', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    expect(md).toContain('<svg');
-    expect(md).toContain('AMD EPYC');
+    expect(md).toContain('<img ');
+    expect(decodeSvgsInMarkdown(md)).toContain('AMD EPYC');
   });
 
   it('renders header and runner info in stat cards', () => {
     const md = workflowMarkdown([makeJob('build'), makeJob('test')], makeConfig());
     expect(md).toContain('Workflow Summary');
-    expect(md).toContain('AMD EPYC');
-    expect(md).toContain('7.0 GB RAM');
-    expect(md).toContain('Linux');
+    expect(decodeSvgsInMarkdown(md)).toContain('AMD EPYC');
+    expect(decodeSvgsInMarkdown(md)).toContain('7.0 GB RAM');
+    expect(decodeSvgsInMarkdown(md)).toContain('Linux');
   });
 
   it('renders stat cards as inline SVG', () => {
@@ -156,8 +162,8 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    expect(md).toContain('<svg');
-    expect(md).toContain('Avg CPU');
+    expect(md).toContain('<img ');
+    expect(decodeSvgsInMarkdown(md)).toContain('Avg CPU');
   });
 
   it('renders CPU and Memory usage charts', () => {
@@ -179,8 +185,8 @@ describe('workflowMarkdown', () => {
       makeConfig(),
     );
     expect(md).toContain('### Execution Timeline');
-    expect(md).toContain('Checkout');
-    expect(md).toContain('Compile');
+    expect(decodeSvgsInMarkdown(md)).toContain('Checkout');
+    expect(decodeSvgsInMarkdown(md)).toContain('Compile');
   });
 
   it('sorts jobs chronologically in execution timeline', () => {
@@ -194,8 +200,9 @@ describe('workflowMarkdown', () => {
       ],
       makeConfig(),
     );
-    const buildIdx = md.indexOf('a-build');
-    const testIdx = md.indexOf('z-test');
+    const decoded = decodeSvgsInMarkdown(md);
+    const buildIdx = decoded.indexOf('a-build');
+    const testIdx = decoded.indexOf('z-test');
     expect(buildIdx).toBeGreaterThan(-1);
     expect(testIdx).toBeGreaterThan(-1);
     expect(buildIdx).toBeLessThan(testIdx);
@@ -209,8 +216,8 @@ describe('workflowMarkdown', () => {
 
   it('handles single job correctly', () => {
     const md = workflowMarkdown([makeJob('deploy')], makeConfig());
-    expect(md).toContain('1 job');
-    expect(md).not.toContain('1 jobs');
+    expect(decodeSvgsInMarkdown(md)).toContain('1 job');
+    expect(decodeSvgsInMarkdown(md)).not.toContain('1 jobs');
   });
 
   it('omits timeline when no timeline data exists', () => {

@@ -152,8 +152,9 @@ describe('processMetrics', () => {
 
     // SVG charts for upload
     expect(charts['stat-cards']).toBeDefined();
-    expect(charts['stat-cards']).toContain('<svg');
-    expect(charts['stat-cards']).toContain('AMD EPYC');
+    expect(charts['stat-cards']).toContain('<img ');
+    const decoded = Buffer.from(charts['stat-cards'].match(/base64,([^"]+)/)![1], 'base64').toString('utf8');
+    expect(decoded).toContain('AMD EPYC');
   });
 
   it('renders inline SVG charts in job markdown', () => {
@@ -163,7 +164,7 @@ describe('processMetrics', () => {
 
     const md = buildJobMarkdown(report, [s1, s2], makeConfig());
     expect(md).toContain('RunnerLens');
-    expect(md).toContain('<svg');
+    expect(md).toContain('<img ');
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
@@ -219,7 +220,7 @@ describe('processMetrics', () => {
     const minimal = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30);
     // SVG charts
     expect(full.charts['timeline']).toBeDefined();
-    expect(full.charts['timeline']).toContain('<svg');
+    expect(full.charts['timeline']).toContain('<img ');
     expect(minimal.charts['timeline']).toBeUndefined();
   });
 
@@ -357,7 +358,7 @@ describe('per-step markdown', () => {
     ];
     const { charts } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
     expect(charts['step-chart']).toBeDefined();
-    expect(charts['step-chart']).toContain('<svg');
+    expect(charts['step-chart']).toContain('<img ');
   });
 
   it('omits per-step table when no steps', () => {

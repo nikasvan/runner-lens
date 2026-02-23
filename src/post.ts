@@ -6,6 +6,7 @@ import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
 import { processMetrics, buildJobMarkdown } from './reporter';
+import { uploadChartSvgs } from './svg-upload';
 import { sendToApi } from './api-client';
 import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
@@ -144,7 +145,7 @@ async function run(): Promise<void> {
     }
 
     // ── Process ───────────────────────────────────────────
-    const { report, chartUrls } = processMetrics(samples, sysInfo, config, dur, steps);
+    const { report, charts, chartUrls } = processMetrics(samples, sysInfo, config, dur, steps);
 
     // ── Reporter self-monitoring ──────────────────────────
     // Use total job duration as denominator so the % is directly
@@ -168,8 +169,16 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Build Job Summary ─────────────────────────────────
-    const markdown = buildJobMarkdown(report, samples, config, chartUrls);
+    // ── Upload SVG charts (primary) or fall back to quickchart URLs ──
+    let urls: Record<string, string> = {};
+    if (config.githubToken && Object.keys(charts).length > 0) {
+      urls = await uploadChartSvgs(charts, config.githubToken);
+    }
+    // Fall back to quickchart.io URLs when SVG upload unavailable
+    if (Object.keys(urls).length === 0) {
+      urls = chartUrls;
+    }
+    const markdown = buildJobMarkdown(report, samples, config, urls);
 
     if (markdown) {
       await core.summary.addRaw(markdown).write();

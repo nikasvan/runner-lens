@@ -5,6 +5,9 @@ import type {
 import { stats, safeMax, safePct } from './stats';
 import { fmtDuration } from './charts';
 import { htmlStatCards, htmlBarChart, htmlTimeline } from './html-charts';
+import {
+  svgImg, statCards, timelineChart, stepBarChart,
+} from './svg-charts';
 import { timelineChartUrl, barChartUrl } from './quickchart';
 import { REPORT_VERSION } from './constants';
 
@@ -92,7 +95,58 @@ function aggregate(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Generate quickchart.io URLs for charts
+// Generate SVG charts for upload (primary)
+// ─────────────────────────────────────────────────────────────
+
+function generateSvgCharts(
+  report: AggregatedReport,
+  samples: MetricSample[],
+  config: MonitorConfig,
+): Record<string, string> {
+  const charts: Record<string, string> = {};
+  const minimal = config.summaryStyle === 'minimal';
+  const sys = report.system;
+
+  const cpuAvgPct = report.cpu.avg;
+  const cpuPeakPct = report.cpu.max;
+  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
+  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
+
+  // Stat cards
+  charts['stat-cards'] = svgImg(statCards([
+    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
+    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, colorVar: 'accent-cyan' },
+    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, colorVar: 'accent-blue' },
+    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
+  ]), 'Stats');
+
+  // Per-step bar chart
+  if (report.steps && report.steps.length > 0) {
+    const svg = stepBarChart(
+      report.steps.map(s => ({ name: s.name, value: s.duration_seconds })),
+      { formatValue: fmtDuration },
+    );
+    if (svg) charts['step-chart'] = svgImg(svg, 'Per-step durations');
+  }
+
+  // Timeline chart
+  if (!minimal) {
+    const cpuV = samples.map(s => s.cpu.usage);
+    const memV = samples.map(s => s.memory.usage_pct);
+    if (cpuV.length >= 4) {
+      const svg = timelineChart(cpuV, memV, {
+        cpuAvg: cpuAvgPct,
+        memAvg: memAvgPct,
+      });
+      if (svg) charts['timeline'] = svgImg(svg, 'CPU & Memory Timeline');
+    }
+  }
+
+  return charts;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Generate quickchart.io URLs (fallback when SVG upload unavailable)
 // ─────────────────────────────────────────────────────────────
 
 function generateChartUrls(
@@ -151,13 +205,17 @@ function markdown(
   // ── Header ──────────────────────────────────────────────
   L.push('## 📊 RunnerLens\n');
 
-  // ── Stat cards (HTML table) ────────────────────────────
-  L.push(htmlStatCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}` },
-    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples` },
-    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%` },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB` },
-  ]) + '\n');
+  // ── Stat cards ─────────────────────────────────────────
+  if (chartUrls['stat-cards']) {
+    L.push(`<img src="${chartUrls['stat-cards']}" alt="RunnerLens stats" width="600">\n`);
+  } else {
+    L.push(htmlStatCards([
+      { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}` },
+      { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples` },
+      { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%` },
+      { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB` },
+    ]) + '\n');
+  }
 
   // ── Per-step breakdown ────────────────────────────────
   if (report.steps && report.steps.length > 0) {
@@ -237,17 +295,24 @@ export function processMetrics(
   config: MonitorConfig,
   durationSec: number,
   steps?: StepMetrics[],
-): { report: AggregatedReport; chartUrls: Record<string, string> } {
+): {
+  report: AggregatedReport;
+  charts: Record<string, string>;    // SVG strings for upload
+  chartUrls: Record<string, string>; // quickchart.io fallback URLs
+} {
   const report = aggregate(samples, sysInfo, durationSec, steps);
-  const chartUrls = config.summaryStyle === 'none'
-    ? {}
-    : generateChartUrls(report, samples, config);
-  return { report, chartUrls };
+  if (config.summaryStyle === 'none') {
+    return { report, charts: {}, chartUrls: {} };
+  }
+  const charts = generateSvgCharts(report, samples, config);
+  const chartUrls = generateChartUrls(report, samples, config);
+  return { report, charts, chartUrls };
 }
 
 /**
  * Build the per-job markdown summary.
- * Uses quickchart.io image URLs for charts, HTML tables for stat cards.
+ * Uses image URLs (<img> tags) for charts when available,
+ * falls back to HTML tables with Unicode sparklines.
  */
 export function buildJobMarkdown(
   report: AggregatedReport,

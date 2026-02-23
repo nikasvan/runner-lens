@@ -6,7 +6,7 @@ jest.mock('@actions/artifact', () => ({
   DefaultArtifactClient: jest.fn(),
 }));
 
-import { workflowMarkdown, generateWorkflowCharts } from '../src/summary';
+import { workflowMarkdown, generateWorkflowCharts, generateWorkflowSvgs } from '../src/summary';
 import type {
   MonitorConfig, AggregatedReport, JobReport,
 } from '../src/types';
@@ -65,7 +65,40 @@ function makeJob(name: string, overrides: Partial<AggregatedReport> = {}): JobRe
 // generateWorkflowCharts
 // ─────────────────────────────────────────────────────────────
 
-describe('generateWorkflowCharts', () => {
+describe('generateWorkflowSvgs', () => {
+  it('generates stat-cards SVG', () => {
+    const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
+    expect(svgs['stat-cards']).toBeDefined();
+    expect(svgs['stat-cards']).toContain('<svg');
+    expect(svgs['stat-cards']).toContain('AMD EPYC');
+  });
+
+  it('generates CPU and memory timeline SVGs', () => {
+    const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
+    expect(svgs['cpu-timeline']).toBeDefined();
+    expect(svgs['cpu-timeline']).toContain('<svg');
+    expect(svgs['mem-timeline']).toBeDefined();
+    expect(svgs['mem-timeline']).toContain('<svg');
+  });
+
+  it('generates waterfall SVG when steps exist', () => {
+    const svgs = generateWorkflowSvgs([makeJob('build', {
+      steps: [
+        { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
+        { name: 'Compile', number: 2, duration_seconds: 90, cpu_avg: 78, cpu_max: 95, mem_avg_mb: 3000, mem_max_mb: 4500, sample_count: 30 },
+      ],
+    })]);
+    expect(svgs['waterfall']).toBeDefined();
+    expect(svgs['waterfall']).toContain('<svg');
+  });
+
+  it('omits waterfall when no steps exist', () => {
+    const svgs = generateWorkflowSvgs([makeJob('build')]);
+    expect(svgs['waterfall']).toBeUndefined();
+  });
+});
+
+describe('generateWorkflowCharts (quickchart fallback)', () => {
   it('generates CPU and memory timeline quickchart URLs', () => {
     const urls = generateWorkflowCharts([makeJob('build'), makeJob('test')]);
     expect(urls['cpu-timeline']).toBeDefined();
@@ -89,44 +122,53 @@ describe('generateWorkflowCharts', () => {
     const urls = generateWorkflowCharts([makeJob('build')]);
     expect(urls['waterfall']).toBeUndefined();
   });
-
-  it('does not include stat-cards URL (stat cards use HTML)', () => {
-    const urls = generateWorkflowCharts([makeJob('build'), makeJob('test')]);
-    expect(urls['stat-cards']).toBeUndefined();
-  });
 });
 
 // ─────────────────────────────────────────────────────────────
 // workflowMarkdown — SVG mode (with chart URLs)
 // ─────────────────────────────────────────────────────────────
 
-describe('workflowMarkdown with chart URLs', () => {
-  it('renders img tags for each chart URL', () => {
+describe('workflowMarkdown with SVG URLs (primary)', () => {
+  it('renders img tags for uploaded SVGs including stat-cards', () => {
+    const md = workflowMarkdown(
+      [makeJob('build'), makeJob('test')],
+      makeConfig(),
+      {
+        'stat-cards': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/stat-cards.svg',
+        'cpu-timeline': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/cpu-timeline.svg',
+        'mem-timeline': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/mem-timeline.svg',
+      },
+    );
+    expect(md).toContain('Workflow Summary');
+    expect(md).toContain('<img');
+    expect(md).toContain('stat-cards.svg');
+    expect(md).toContain('cpu-timeline.svg');
+    expect(md).toContain('mem-timeline.svg');
+  });
+
+  it('falls back to HTML stat cards when only chart URLs exist (no stat-cards URL)', () => {
     const md = workflowMarkdown(
       [makeJob('build'), makeJob('test')],
       makeConfig(),
       {
         'cpu-timeline': 'https://quickchart.io/chart?c=test-cpu',
-        'mem-timeline': 'https://quickchart.io/chart?c=test-mem',
       },
     );
     expect(md).toContain('Workflow Summary');
-    expect(md).toContain('<img');
-    expect(md).toContain('test-cpu');
-    expect(md).toContain('test-mem');
-    // Stat cards rendered as HTML table
     expect(md).toContain('<table>');
     expect(md).toContain('AMD EPYC');
+    expect(md).toContain('<img');
+    expect(md).toContain('test-cpu');
   });
 
   it('includes waterfall img when URL provided', () => {
     const md = workflowMarkdown(
       [makeJob('build')],
       makeConfig(),
-      { 'waterfall': 'https://quickchart.io/chart?c=test-waterfall' },
+      { 'waterfall': 'https://example.com/waterfall.svg' },
     );
     expect(md).toContain('Execution Timeline');
-    expect(md).toContain('test-waterfall');
+    expect(md).toContain('waterfall.svg');
   });
 });
 

@@ -136,10 +136,10 @@ describe('fmtDuration', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('processMetrics', () => {
-  it('produces a complete report and chart URLs', () => {
+  it('produces a complete report with SVG charts and quickchart URLs', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
-    const { report, chartUrls } = processMetrics(
+    const { report, charts, chartUrls } = processMetrics(
       [s1, s2], makeSysInfo(), makeConfig(), 6,
     );
 
@@ -150,23 +150,27 @@ describe('processMetrics', () => {
     expect(report.cpu.avg).toBe(45);
     expect(report.memory.total_mb).toBe(7168);
 
-    // Chart URLs are Record<string, string>
+    // SVG charts for upload
+    expect(charts['stat-cards']).toBeDefined();
+    expect(charts['stat-cards']).toContain('<svg');
+    expect(charts['stat-cards']).toContain('AMD EPYC');
+
+    // Quickchart fallback URLs
     expect(typeof chartUrls).toBe('object');
   });
 
-  it('renders quickchart img tags when chart URLs exist', () => {
-    const samples = Array(10).fill(null).map((_, i) =>
-      makeSample({ timestamp: 1700000000 + i * 3, cpu: { user: i * 10, system: 5, idle: 85 - i * 10, iowait: 0, steal: 0, usage: i * 10 + 5 } }),
-    );
-    const { report, chartUrls } = processMetrics(samples, makeSysInfo(), makeConfig(), 30);
+  it('renders img tags when chart URLs provided', () => {
+    const s1 = makeSample({ timestamp: 1700000000 });
+    const s2 = makeSample({ timestamp: 1700000003 });
+    const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
 
-    const md = buildJobMarkdown(report, samples, makeConfig(), chartUrls);
+    const md = buildJobMarkdown(report, [s1, s2], makeConfig(), {
+      'stat-cards': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/stat-cards.svg',
+      'timeline': 'https://raw.githubusercontent.com/test/repo/runner-lens-assets/timeline.svg',
+    });
     expect(md).toContain('RunnerLens');
-    // Timeline chart URL should be present as img
-    if (chartUrls['timeline']) {
-      expect(md).toContain('<img');
-      expect(md).toContain('quickchart.io');
-    }
+    expect(md).toContain('<img');
+    expect(md).toContain('stat-cards.svg');
   });
 
   it('falls back to HTML tables when no chart URLs', () => {
@@ -186,11 +190,12 @@ describe('processMetrics', () => {
     expect(Number.isFinite(report.memory.avg)).toBe(true);
   });
 
-  it('produces no chart URLs when summaryStyle is none', () => {
+  it('produces no charts when summaryStyle is none', () => {
     const s = makeSample();
-    const { chartUrls } = processMetrics(
+    const { charts, chartUrls } = processMetrics(
       [s, s], makeSysInfo(), makeConfig({ summaryStyle: 'none' }), 60,
     );
+    expect(Object.keys(charts)).toHaveLength(0);
     expect(Object.keys(chartUrls)).toHaveLength(0);
   });
 
@@ -224,12 +229,17 @@ describe('processMetrics', () => {
     expect(report.memory.swap_max_mb).toBe(768);
   });
 
-  it('generates timeline chart URL in full but not minimal', () => {
+  it('generates timeline charts in full but not minimal', () => {
     const samples = Array(10).fill(null).map((_, i) =>
       makeSample({ timestamp: 1700000000 + i * 3, cpu: { user: i * 10, system: 5, idle: 85 - i * 10, iowait: 0, steal: 0, usage: i * 10 + 5 } }),
     );
     const full = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'full' }), 30);
     const minimal = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30);
+    // SVG charts
+    expect(full.charts['timeline']).toBeDefined();
+    expect(full.charts['timeline']).toContain('<svg');
+    expect(minimal.charts['timeline']).toBeUndefined();
+    // quickchart fallback URLs
     expect(full.chartUrls['timeline']).toBeDefined();
     expect(full.chartUrls['timeline']).toContain('quickchart.io');
     expect(minimal.chartUrls['timeline']).toBeUndefined();
@@ -362,14 +372,16 @@ describe('per-step markdown', () => {
     expect(md).toContain('Build');
   });
 
-  it('generates step-chart URL when steps provided', () => {
+  it('generates step-chart SVG and URL when steps provided', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const steps: StepMetrics[] = [
       { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
       { name: 'Build', number: 2, duration_seconds: 120, cpu_avg: 67, cpu_max: 95, mem_avg_mb: 2300, mem_max_mb: 3100, sample_count: 40 },
     ];
-    const { chartUrls } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    const { charts, chartUrls } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    expect(charts['step-chart']).toBeDefined();
+    expect(charts['step-chart']).toContain('<svg');
     expect(chartUrls['step-chart']).toBeDefined();
     expect(chartUrls['step-chart']).toContain('quickchart.io');
   });

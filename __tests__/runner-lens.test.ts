@@ -136,10 +136,10 @@ describe('fmtDuration', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('processMetrics', () => {
-  it('produces a complete report', () => {
+  it('produces a complete report with SVG charts', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
-    const { report } = processMetrics(
+    const { report, charts } = processMetrics(
       [s1, s2], makeSysInfo(), makeConfig(), 6,
     );
 
@@ -149,15 +149,21 @@ describe('processMetrics', () => {
     expect(report.duration_seconds).toBe(6);
     expect(report.cpu.avg).toBe(45);
     expect(report.memory.total_mb).toBe(7168);
+
+    // Raw SVG charts for upload
+    expect(charts['stat-cards']).toBeDefined();
+    expect(charts['stat-cards']).toContain('<svg');
+    expect(charts['stat-cards']).toContain('AMD EPYC');
   });
 
-  it('renders mermaid charts in job markdown', () => {
+  it('renders HTML charts in job markdown', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
 
     const md = buildJobMarkdown(report, [s1, s2], makeConfig());
     expect(md).toContain('RunnerLens');
+    expect(md).toContain('<table');
     expect(md).toContain('AMD EPYC');
   });
 
@@ -168,7 +174,7 @@ describe('processMetrics', () => {
     expect(Number.isFinite(report.memory.avg)).toBe(true);
   });
 
-  it('returns empty charts with mermaid approach', () => {
+  it('produces no charts when summaryStyle is none', () => {
     const s = makeSample();
     const { charts } = processMetrics(
       [s, s], makeSysInfo(), makeConfig({ summaryStyle: 'none' }), 60,
@@ -206,20 +212,16 @@ describe('processMetrics', () => {
     expect(report.memory.swap_max_mb).toBe(768);
   });
 
-  it('generates timeline in full markdown but not minimal', () => {
+  it('generates timeline charts in full but not minimal', () => {
     const samples = Array(10).fill(null).map((_, i) =>
       makeSample({ timestamp: 1700000000 + i * 3, cpu: { user: i * 10, system: 5, idle: 85 - i * 10, iowait: 0, steal: 0, usage: i * 10 + 5 } }),
     );
-    const fullMd = buildJobMarkdown(
-      processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'full' }), 30).report,
-      samples, makeConfig({ summaryStyle: 'full' }),
-    );
-    const minimalMd = buildJobMarkdown(
-      processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30).report,
-      samples, makeConfig({ summaryStyle: 'minimal' }),
-    );
-    expect(fullMd).toContain('### Timeline');
-    expect(minimalMd).not.toContain('### Timeline');
+    const full = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'full' }), 30);
+    const minimal = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30);
+    // SVG charts
+    expect(full.charts['timeline']).toBeDefined();
+    expect(full.charts['timeline']).toContain('<svg');
+    expect(minimal.charts['timeline']).toBeUndefined();
   });
 
   it('includes timeline with correct length for multiple samples', () => {
@@ -347,18 +349,16 @@ describe('per-step markdown', () => {
     expect(md).not.toContain('Per-Step Breakdown');
   });
 
-  it('generates step chart in markdown when steps provided', () => {
+  it('generates step-chart SVG and URL when steps provided', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const steps: StepMetrics[] = [
       { name: 'Checkout', number: 1, duration_seconds: 5, cpu_avg: 23, cpu_max: 45, mem_avg_mb: 1200, mem_max_mb: 1500, sample_count: 2 },
       { name: 'Build', number: 2, duration_seconds: 120, cpu_avg: 67, cpu_max: 95, mem_avg_mb: 2300, mem_max_mb: 3100, sample_count: 40 },
     ];
-    const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
-    const md = buildJobMarkdown(report, [s1, s2], makeConfig());
-    expect(md).toContain('### Steps');
-    expect(md).toContain('Checkout');
-    expect(md).toContain('Build');
+    const { charts } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    expect(charts['step-chart']).toBeDefined();
+    expect(charts['step-chart']).toContain('<svg');
   });
 
   it('omits per-step table when no steps', () => {

@@ -60,7 +60,7 @@ async function getBranchTip(token: string): Promise<string | null> {
 }
 
 /**
- * Create the assets branch as an orphan with the given tree SHA.
+ * Create the assets branch as an orphan with the given commit SHA.
  * Returns true if created (or already exists from a concurrent job).
  */
 async function createBranch(token: string, commitSha: string): Promise<boolean> {
@@ -75,6 +75,32 @@ async function createBranch(token: string, commitSha: string): Promise<boolean> 
 // ── Upload ──────────────────────────────────────────────────
 
 /**
+ * Build raw content URLs for uploaded files.
+ *
+ * Uses the COMMIT SHA instead of the branch name so that
+ * raw.githubusercontent.com (and GitHub's camo proxy) can
+ * resolve the file immediately without waiting for CDN
+ * propagation of the new branch pointer.
+ */
+function buildUrls(
+  repo: string,
+  serverUrl: string,
+  commitSha: string,
+  subdir: string,
+  entries: Array<[string, string]>,
+): Record<string, string> {
+  const rawBase = serverUrl === 'https://github.com'
+    ? `https://raw.githubusercontent.com/${repo}`
+    : `${serverUrl}/${repo}/raw`;
+
+  const urls: Record<string, string> = {};
+  for (const [name] of entries) {
+    urls[name] = `${rawBase}/${commitSha}/${subdir}/${name}.svg`;
+  }
+  return urls;
+}
+
+/**
  * Upload SVG charts to the runner-lens-assets branch.
  * Returns a map of chart name → raw URL for <img> tags.
  */
@@ -82,20 +108,16 @@ export async function uploadChartSvgs(
   charts: Record<string, string>,
   token: string,
 ): Promise<Record<string, string>> {
-  const urls: Record<string, string> = {};
   const entries = Object.entries(charts);
-  if (!token || entries.length === 0) return urls;
+  if (!token || entries.length === 0) return {};
 
   const repo = process.env.GITHUB_REPOSITORY;
   const runId = process.env.GITHUB_RUN_ID;
   const jobName = process.env.GITHUB_JOB ?? 'job';
-  if (!repo || !runId) return urls;
+  if (!repo || !runId) return {};
 
   const subdir = `runs/${runId}/${jobName}`;
   const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
-  const rawBase = serverUrl === 'https://github.com'
-    ? `https://raw.githubusercontent.com/${repo}`
-    : `${serverUrl}/${repo}/raw`;
 
   try {
     // Create blobs for all SVGs in parallel (base64 for reliability)
@@ -148,32 +170,45 @@ export async function uploadChartSvgs(
       });
       if (!newCommit.ok) throw new Error(`Commit creation failed: ${newCommit.status} — ${newCommit.message}`);
 
+      let pushed = false;
       if (tipSha) {
         // Update existing branch ref
         const update = await ghApi(token, 'PATCH', `/git/refs/heads/${BRANCH}`, {
           sha: newCommit.data.sha,
         });
-        if (update.ok) {
-          for (const [name] of entries) {
-            urls[name] = `${rawBase}/${BRANCH}/${subdir}/${name}.svg`;
-          }
-          core.info(`RunnerLens: uploaded ${entries.length} chart(s) to ${BRANCH} branch`);
-          return urls;
-        }
-        // Ref update failed (concurrent push) — retry
+        pushed = update.ok;
       } else {
         // Create new branch with this commit
-        const created = await createBranch(token, newCommit.data.sha);
-        if (created) {
-          for (const [name] of entries) {
-            urls[name] = `${rawBase}/${BRANCH}/${subdir}/${name}.svg`;
-          }
-          core.info(`RunnerLens: created ${BRANCH} branch with ${entries.length} chart(s)`);
-          return urls;
-        }
-        // Another job created the branch — retry with base_tree merge
+        pushed = await createBranch(token, newCommit.data.sha);
       }
 
+      if (pushed) {
+        // Use commit SHA in URLs for immediate availability (no CDN branch cache delay)
+        const urls = buildUrls(repo, serverUrl, newCommit.data.sha, subdir, entries);
+
+        // Verify file is accessible via Contents API (immediately consistent)
+        const verifyPath = `${subdir}/${entries[0][0]}.svg`;
+        const verify = await ghApi(token, 'GET', `/contents/${verifyPath}?ref=${newCommit.data.sha}`);
+        if (verify.ok) {
+          core.info(`RunnerLens: uploaded ${entries.length} chart(s) — commit ${newCommit.data.sha.slice(0, 7)}`);
+          core.debug(`RunnerLens: chart URL sample — ${urls[entries[0][0]]}`);
+          return urls;
+        }
+
+        // Contents API couldn't find it — try branch name URL as fallback
+        core.debug(`RunnerLens: commit-SHA verify failed (${verify.message}), trying branch URL`);
+        const rawBase = serverUrl === 'https://github.com'
+          ? `https://raw.githubusercontent.com/${repo}`
+          : `${serverUrl}/${repo}/raw`;
+        const branchUrls: Record<string, string> = {};
+        for (const [name] of entries) {
+          branchUrls[name] = `${rawBase}/${BRANCH}/${subdir}/${name}.svg`;
+        }
+        core.info(`RunnerLens: uploaded ${entries.length} chart(s) to ${BRANCH} branch`);
+        return branchUrls;
+      }
+
+      // Push failed (concurrent update) — retry after brief delay
       if (attempt < 2) {
         await new Promise(r => setTimeout(r, 500 + Math.random() * 1500));
       }
@@ -184,5 +219,5 @@ export async function uploadChartSvgs(
     core.warning(`RunnerLens: chart upload failed — ${e}`);
   }
 
-  return urls;
+  return {};
 }

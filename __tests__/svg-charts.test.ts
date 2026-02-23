@@ -2,7 +2,7 @@
 // RunnerLens — SVG Charts Test Suite
 // ─────────────────────────────────────────────────────────────
 
-import { svgImg, timelineChart, gaugeChart, stepBarChart, workflowTimelineChart, waterfallChart, statCards } from '../src/svg-charts';
+import { svgImg, timelineChart, stepBarChart, workflowTimelineChart, waterfallChart, statCards } from '../src/svg-charts';
 
 // ── svgImg ──────────────────────────────────────────────────
 
@@ -30,58 +30,6 @@ describe('svgImg', () => {
     const img = svgImg(trivialSvg, 'test');
     expect(img).not.toContain('width=');
     expect(img).not.toContain('height=');
-  });
-});
-
-// ── gaugeChart ──────────────────────────────────────────────
-
-describe('gaugeChart', () => {
-  it('returns a valid SVG string', () => {
-    const svg = gaugeChart(45);
-    expect(svg).toMatch(/^<svg [\s\S]+<\/svg>$/);
-    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
-  });
-
-  it('contains the percentage text', () => {
-    const svg = gaugeChart(45);
-    expect(svg).toContain('>45%<');
-  });
-
-  it('uses green color for healthy values', () => {
-    const svg = gaugeChart(30);
-    expect(svg).toContain('var(--green)');
-  });
-
-  it('uses yellow color at warning threshold', () => {
-    const svg = gaugeChart(85);
-    expect(svg).toContain('var(--yellow)');
-  });
-
-  it('uses red color at critical threshold', () => {
-    const svg = gaugeChart(96);
-    expect(svg).toContain('var(--red)');
-  });
-
-  it('respects custom thresholds', () => {
-    const svg = gaugeChart(50, { warn: 40, crit: 60 });
-    expect(svg).toContain('var(--yellow)');
-  });
-
-  it('clamps values to 0-100 range', () => {
-    expect(() => gaugeChart(-10)).not.toThrow();
-    expect(() => gaugeChart(200)).not.toThrow();
-    expect(gaugeChart(-10)).toContain('>0%<');
-    expect(gaugeChart(200)).toContain('>100%<');
-  });
-
-  it('includes label when provided', () => {
-    const svg = gaugeChart(50, { label: 'CPU' });
-    expect(svg).toContain('CPU');
-  });
-
-  it('includes dark mode media query', () => {
-    const svg = gaugeChart(50);
-    expect(svg).toContain('prefers-color-scheme: light');
   });
 });
 

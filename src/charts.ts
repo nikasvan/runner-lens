@@ -2,13 +2,6 @@
 // RunnerLens — Charts & Formatting
 // ─────────────────────────────────────────────────────────────
 
-/** Status dot based on percentage thresholds. */
-export function statusDot(pct: number, warn = 80, crit = 95): string {
-  if (pct >= crit) return '🔴';
-  if (pct >= warn) return '🟡';
-  return '🟢';
-}
-
 /** Format seconds into "1h 23m 4s". */
 export function fmtDuration(sec: number): string {
   if (sec < 60) return `${sec}s`;

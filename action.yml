@@ -26,10 +26,6 @@ inputs:
     description: 'Metric sampling interval in seconds (1–30)'
     required: false
     default: '3'
-  include-processes:
-    description: 'Capture top processes by CPU/memory'
-    required: false
-    default: 'true'
   github-token:
     description: 'GitHub token for per-step metrics (defaults to the built-in token)'
     required: false
@@ -42,22 +38,6 @@ inputs:
     description: 'Maximum metrics file size in MB before rotation (0 = unlimited)'
     required: false
     default: '100'
-  threshold-cpu-warn:
-    description: 'CPU % warning threshold'
-    required: false
-    default: '80'
-  threshold-cpu-crit:
-    description: 'CPU % critical threshold'
-    required: false
-    default: '95'
-  threshold-mem-warn:
-    description: 'Memory % warning threshold'
-    required: false
-    default: '80'
-  threshold-mem-crit:
-    description: 'Memory % critical threshold'
-    required: false
-    default: '95'
   upload-artifact:
     description: 'Upload raw samples and report as a workflow artifact'
     required: false

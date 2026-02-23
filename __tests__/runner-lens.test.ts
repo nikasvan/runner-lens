@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { stats, safeMax, safePct } from '../src/stats';
-import { fmtDuration, statusDot } from '../src/charts';
+import { fmtDuration } from '../src/charts';
 import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import type {
@@ -51,13 +51,12 @@ function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
   return {
     mode: 'monitor',
     sampleInterval: 3,
-    includeProcesses: true,
+
     summaryStyle: 'full',
     maxSizeMb: 100,
     apiKey: '',
     apiEndpoint: 'https://api.runnerlens.com',
     githubToken: '',
-    thresholds: { cpu_warn: 80, cpu_crit: 95, mem_warn: 80, mem_crit: 95 },
     ...overrides,
   };
 }
@@ -125,12 +124,6 @@ describe('safePct', () => {
 // charts.ts
 // ─────────────────────────────────────────────────────────────
 
-describe('statusDot', () => {
-  it('returns green for low values', () => expect(statusDot(50)).toBe('🟢'));
-  it('returns yellow for warning', () => expect(statusDot(85)).toBe('🟡'));
-  it('returns red for critical', () => expect(statusDot(96)).toBe('🔴'));
-});
-
 describe('fmtDuration', () => {
   it('formats seconds', () => expect(fmtDuration(45)).toBe('45s'));
   it('formats minutes', () => expect(fmtDuration(125)).toBe('2m 5s'));
@@ -157,12 +150,10 @@ describe('processMetrics', () => {
     expect(report.cpu.avg).toBe(45);
     expect(report.memory.total_mb).toBe(7168);
 
-    // New markdown format
+    // Markdown format — stat cards with SVG
     expect(markdown).toContain('RunnerLens');
-    expect(markdown).toContain('Dashboard');
-    expect(markdown).toContain('**CPU**');
-    expect(markdown).toContain('**Memory**');
-    expect(markdown).toContain('data:image/svg+xml;base64,'); // SVG gauge charts
+    expect(markdown).toContain('data:image/svg+xml;base64,'); // SVG stat cards
+    expect(markdown).toContain('alt="Summary stats"');
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {

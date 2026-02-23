@@ -29,7 +29,6 @@ function themeStyles(): string {
         --grid: #30363d; --grid-subtle: #21262d; --muted: #8b949e;
         --cpu-stroke: #58a6ff; --cpu-fill: rgba(88,166,255,0.25);
         --mem-stroke: #bc8cff; --mem-fill: rgba(188,140,255,0.25);
-        --green: #3fb950; --yellow: #d29922; --red: #f85149;
         --bar-fill: #58a6ff; --bar-bg: #21262d;
         --accent-blue: #58a6ff; --accent-purple: #bc8cff;
         --accent-cyan: #39d2c0; --accent-green: #3fb950;
@@ -41,7 +40,6 @@ function themeStyles(): string {
           --grid: #d0d7de; --grid-subtle: #eaeef2; --muted: #656d76;
           --cpu-stroke: #0969da; --cpu-fill: rgba(9,105,218,0.25);
           --mem-stroke: #8250df; --mem-fill: rgba(130,80,223,0.25);
-          --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
           --bar-fill: #0969da; --bar-bg: #eaeef2;
           --accent-blue: #0969da; --accent-purple: #8250df;
           --accent-cyan: #0598bc; --accent-green: #1a7f37;
@@ -206,53 +204,6 @@ export function timelineChart(
     memArea,
     cpuArea,
     ...legend,
-    `</svg>`,
-  ].join('');
-}
-
-// ── Gauge / Donut Chart ─────────────────────────────────────
-
-export interface GaugeOpts {
-  size?: number;
-  warn?: number;
-  crit?: number;
-  label?: string;
-}
-
-/**
- * Circular gauge chart showing a percentage. Returns raw SVG string.
- */
-export function gaugeChart(pct: number, opts: GaugeOpts = {}): string {
-  const size   = opts.size ?? 80;
-  const warn   = opts.warn ?? 80;
-  const crit   = opts.crit ?? 95;
-  const label  = opts.label;
-  const cx     = size / 2;
-  const cy     = size / 2;
-  const r      = size * 0.375;  // 30 for size=80
-  const sw     = size * 0.1;    // 8 for size=80
-  const clamped = Math.max(0, Math.min(100, pct));
-  const circumference = 2 * Math.PI * r;
-  const dashOffset = circumference * (1 - clamped / 100);
-
-  const color = clamped >= crit ? 'var(--red)' : clamped >= warn ? 'var(--yellow)' : 'var(--green)';
-
-  const labelEl = label
-    ? `<text x="${cx}" y="${cy + size * 0.2}" fill="var(--muted)" font-size="${(size * 0.13).toFixed(0)}" text-anchor="middle">${escapeXml(label)}</text>`
-    : '';
-
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">`,
-    `<defs>${themeStyles()}</defs>`,
-    // Background ring
-    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--grid)" stroke-width="${sw}"/>`,
-    // Foreground arc
-    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" ` +
-      `stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${dashOffset.toFixed(2)}" ` +
-      `stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})"/>`,
-    // Center percentage
-    `<text x="${cx}" y="${cy + (label ? -size * 0.02 : size * 0.05)}" fill="var(--fg)" font-size="${(size * 0.22).toFixed(0)}" font-weight="700" text-anchor="middle">${Math.round(clamped)}%</text>`,
-    labelEl,
     `</svg>`,
   ].join('');
 }

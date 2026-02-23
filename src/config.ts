@@ -34,17 +34,10 @@ export function parseConfig(): MonitorConfig {
   return {
     mode,
     sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),
-    includeProcesses: core.getInput('include-processes') !== 'false',
     summaryStyle,
     maxSizeMb: Math.max(0, intInput('max-file-size', 100)),
     apiKey,
     apiEndpoint: core.getInput('api-endpoint') || 'https://api.runnerlens.com',
     githubToken,
-    thresholds: {
-      cpu_warn: clamp(intInput('threshold-cpu-warn', 80), 1, 100),
-      cpu_crit: clamp(intInput('threshold-cpu-crit', 95), 1, 100),
-      mem_warn: clamp(intInput('threshold-mem-warn', 80), 1, 100),
-      mem_crit: clamp(intInput('threshold-mem-crit', 95), 1, 100),
-    },
   };
 }

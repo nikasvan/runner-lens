@@ -3,8 +3,8 @@ import type {
   AggregatedReport, ProcessInfo, StepMetrics,
 } from './types';
 import { stats, safeMax, safePct } from './stats';
-import { statusDot, fmtDuration } from './charts';
-import { timelineChart, gaugeChart, stepBarChart, svgImg } from './svg-charts';
+import { fmtDuration } from './charts';
+import { timelineChart, stepBarChart, statCards, svgImg } from './svg-charts';
 import { REPORT_VERSION } from './constants';
 
 const TIMELINE_POINTS = 80;
@@ -99,7 +99,6 @@ function markdown(
   samples: MetricSample[],
   config: MonitorConfig,
 ): string {
-  const full    = config.summaryStyle === 'full';
   const minimal = config.summaryStyle === 'minimal';
   const L: string[] = [];
 
@@ -108,43 +107,19 @@ function markdown(
   const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
   const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
 
-  // ── Header: runner summary on one line ─────────────────
+  const sys = report.system;
+
+  // ── Header ──────────────────────────────────────────────
   L.push('## 📊 RunnerLens\n');
-  L.push(
-    `${report.system.cpu_count} cores · ` +
-    `${(report.system.total_memory_mb / 1024).toFixed(1)} GB RAM · ` +
-    `${fmtDuration(report.duration_seconds)} · ` +
-    `${report.sample_count} samples\n`,
-  );
 
-  // ── Dashboard: visual overview table ───────────────────
-  L.push('### Dashboard\n');
-  L.push('| | Resource | Usage | Peak | Detail |');
-  L.push('|:---:|---|---|---|---|');
-
-  // CPU row
-  const cpuGauge = svgImg(gaugeChart(cpuAvgPct, { warn: config.thresholds.cpu_warn, crit: config.thresholds.cpu_crit, label: 'CPU' }), 'CPU gauge', 60, 60);
-  L.push(
-    `| ${statusDot(cpuAvgPct, config.thresholds.cpu_warn, config.thresholds.cpu_crit)} ` +
-    `| **CPU** ` +
-    `| ${cpuGauge} **${cpuAvgPct.toFixed(0)}%** avg ` +
-    `| ${cpuPeakPct.toFixed(0)}% ` +
-    `| p95: ${report.cpu.p95.toFixed(0)}% · p99: ${report.cpu.p99.toFixed(0)}% |`,
-  );
-
-  // Memory row
-  const memUsedGB = (report.memory.avg / 1024).toFixed(1);
-  const memTotalGB = (report.memory.total_mb / 1024).toFixed(1);
-  const memGauge = svgImg(gaugeChart(memAvgPct, { warn: config.thresholds.mem_warn, crit: config.thresholds.mem_crit, label: 'MEM' }), 'Memory gauge', 60, 60);
-  L.push(
-    `| ${statusDot(memAvgPct, config.thresholds.mem_warn, config.thresholds.mem_crit)} ` +
-    `| **Memory** ` +
-    `| ${memGauge} **${memAvgPct.toFixed(0)}%** avg ` +
-    `| ${memPeakPct.toFixed(0)}% ` +
-    `| ${memUsedGB} / ${memTotalGB} GB |`,
-  );
-
-  L.push('');
+  // ── Stat cards ──────────────────────────────────────────
+  const cardsSvg = statCards([
+    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
+    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, colorVar: 'accent-cyan' },
+    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, colorVar: 'accent-blue' },
+    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
+  ]);
+  L.push(svgImg(cardsSvg, 'Summary stats', 600) + '\n');
 
   // ── Per-step breakdown ───────────────────────────────────
   if (report.steps && report.steps.length > 0) {
@@ -154,7 +129,7 @@ function markdown(
     const barSvg = stepBarChart(barData, { formatValue: fmtDuration });
     if (barSvg) L.push(svgImg(barSvg, 'Per-step duration chart', 600) + '\n');
 
-    L.push('| # | Step | Duration | CPU avg | CPU peak | Sys Mem avg | Sys Mem peak |');
+    L.push('| # | Step | Duration | CPU avg | CPU peak | Mem avg | Mem peak |');
     L.push('|---:|---|---:|---:|---:|---:|---:|');
     for (const s of report.steps) {
       const memAvgGB = (s.mem_avg_mb / 1024).toFixed(1);
@@ -182,29 +157,6 @@ function markdown(
       L.push(svgImg(tlSvg, 'CPU and Memory timeline', 600, 200));
       L.push('\n</details>\n');
     }
-  }
-
-  // ── Top processes (collapsed) ──────────────────────────
-  if (full && config.includeProcesses && report.top_processes.length > 0) {
-    L.push('<details><summary><strong>🔄 Top Processes</strong></summary>\n');
-    L.push('| Process | Peak CPU | Memory |');
-    L.push('|---|---:|---:|');
-    for (const p of report.top_processes.slice(0, 6)) {
-      L.push(`| \`${p.name}\` | ${p.cpu_pct.toFixed(1)}% | ${p.mem_mb.toFixed(0)} MB |`);
-    }
-    L.push('\n</details>\n');
-  }
-
-  // ── Runner details (collapsed) ─────────────────────────
-  if (full) {
-    L.push('<details><summary><strong>🖥️ Runner Details</strong></summary>\n');
-    L.push(
-      `**CPU:** ${report.system.cpu_count} × ${report.system.cpu_model}  \n` +
-      `**RAM:** ${report.system.total_memory_mb.toLocaleString()} MB  \n` +
-      `**OS:** ${report.system.os_release} · Kernel ${report.system.kernel}  \n` +
-      `**Runner:** ${report.system.runner_name} (${report.system.runner_os}/${report.system.runner_arch})`,
-    );
-    L.push('\n</details>\n');
   }
 
   // ── Footer ─────────────────────────────────────────────

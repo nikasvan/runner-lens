@@ -19,13 +19,12 @@ function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
   return {
     mode: 'summarize',
     sampleInterval: 3,
-    includeProcesses: true,
+
     summaryStyle: 'full',
     maxSizeMb: 100,
     apiKey: '',
     apiEndpoint: 'https://api.runnerlens.com',
     githubToken: '',
-    thresholds: { cpu_warn: 80, cpu_crit: 95, mem_warn: 80, mem_crit: 95 },
     ...overrides,
   };
 }

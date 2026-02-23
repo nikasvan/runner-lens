@@ -59,23 +59,14 @@ export interface SystemInfo {
   runner_arch: string;
 }
 
-export interface ThresholdConfig {
-  cpu_warn: number;
-  cpu_crit: number;
-  mem_warn: number;
-  mem_crit: number;
-}
-
 export interface MonitorConfig {
   mode: 'monitor' | 'summarize';
   sampleInterval: number;
-  includeProcesses: boolean;
   summaryStyle: 'full' | 'compact' | 'minimal' | 'none';
   maxSizeMb: number;
   apiKey: string;
   apiEndpoint: string;
   githubToken: string;
-  thresholds: ThresholdConfig;
 }
 
 export interface MetricStats {

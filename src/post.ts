@@ -194,7 +194,7 @@ async function run(): Promise<void> {
         fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
 
         const files = [reportFile];
-        if (core.getInput('upload-artifact') === 'true') {
+        if (config.uploadArtifact) {
           const samplesFile = path.join(artifactDir, 'samples.json');
           fs.writeFileSync(samplesFile, JSON.stringify(samples, null, 2));
           files.push(samplesFile);

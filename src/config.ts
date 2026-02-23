@@ -36,6 +36,7 @@ export function parseConfig(): MonitorConfig {
     sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),
     summaryStyle,
     maxSizeMb: Math.max(0, intInput('max-file-size', 100)),
+    uploadArtifact: core.getInput('upload-artifact') === 'true',
     apiKey,
     apiEndpoint: core.getInput('api-endpoint') || 'https://api.runnerlens.com',
     githubToken,

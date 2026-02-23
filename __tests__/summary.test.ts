@@ -21,6 +21,7 @@ function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
     sampleInterval: 3,
     summaryStyle: 'full',
     maxSizeMb: 100,
+    uploadArtifact: false,
     apiKey: '',
     apiEndpoint: 'https://api.runnerlens.com',
     githubToken: '',

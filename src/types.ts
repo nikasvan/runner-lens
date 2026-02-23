@@ -64,6 +64,7 @@ export interface MonitorConfig {
   sampleInterval: number;
   summaryStyle: 'full' | 'compact' | 'minimal' | 'none';
   maxSizeMb: number;
+  uploadArtifact: boolean;
   apiKey: string;
   apiEndpoint: string;
   githubToken: string;

@@ -10,7 +10,7 @@ import type { MonitorConfig, JobReport, AggregatedReport } from './types';
 import { safePct } from './stats';
 import { fmtDuration } from './charts';
 import {
-  svgImg, statCards, workflowTimelineChart, waterfallChart,
+  resolvedSvg, statCards, workflowTimelineChart, waterfallChart,
   type TimelineSegment,
 } from './svg-charts';
 import { statCardChartUrl, waterfallChartUrl, workflowTimelineUrl } from './quickchart';
@@ -111,19 +111,19 @@ function buildWaterfallSteps(sorted: JobReport[]) {
   return wfSteps;
 }
 
-/** Generate SVG chart strings for upload. */
+/** Generate raw SVG chart strings for upload. */
 export function generateWorkflowSvgs(jobs: JobReport[]): Record<string, string> {
   const charts: Record<string, string> = {};
   const a = aggregateStats(jobs);
   const sorted = sortedJobs(jobs);
 
   // Stat cards
-  charts['stat-cards'] = svgImg(statCards([
+  charts['stat-cards'] = resolvedSvg(statCards([
     { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}`, colorVar: 'accent-cyan' },
     { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel, colorVar: 'accent-green' },
     { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%`, colorVar: 'accent-blue' },
     { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
-  ]), 'Workflow stats');
+  ]));
 
   // CPU timeline
   const cpuSegments: TimelineSegment[] = sorted
@@ -135,7 +135,7 @@ export function generateWorkflowSvgs(jobs: JobReport[]): Record<string, string> 
       color: 'cpu-stroke', fillColor: 'cpu-fill', yMax: 100,
       yFormat: (v) => `${v.toFixed(0)}%`, title: 'CPU Usage',
     });
-    if (svg) charts['cpu-timeline'] = svgImg(svg, 'CPU Timeline');
+    if (svg) charts['cpu-timeline'] = resolvedSvg(svg);
   }
 
   // Memory timeline
@@ -148,7 +148,7 @@ export function generateWorkflowSvgs(jobs: JobReport[]): Record<string, string> 
       color: 'mem-stroke', fillColor: 'mem-fill', yMax: a.totalMb,
       yFormat: (v) => `${(v / 1024).toFixed(1)} GB`, title: 'Memory Usage',
     });
-    if (svg) charts['mem-timeline'] = svgImg(svg, 'Memory Timeline');
+    if (svg) charts['mem-timeline'] = resolvedSvg(svg);
   }
 
   // Execution waterfall
@@ -157,7 +157,7 @@ export function generateWorkflowSvgs(jobs: JobReport[]): Record<string, string> 
     const svg = waterfallChart(wfSteps.map(s => ({
       label: s.step, startSec: s.startSec, durationSec: s.durationSec, group: s.job,
     })));
-    if (svg) charts['waterfall'] = svgImg(svg, 'Execution Timeline');
+    if (svg) charts['waterfall'] = resolvedSvg(svg);
   }
 
   return charts;
@@ -210,37 +210,44 @@ export function generateWorkflowCharts(jobs: JobReport[]): Record<string, string
 }
 
 // ─────────────────────────────────────────────────────────────
-// Build workflow markdown with quickchart.io image URLs
-// GitHub Job Summary only allows https:// image URLs.
+// Build workflow markdown with uploaded SVG URLs (quickchart fallback)
 // ─────────────────────────────────────────────────────────────
 
-function workflowMarkdownQuickchart(jobs: JobReport[]): string {
+function workflowMarkdownQuickchart(
+  jobs: JobReport[],
+  uploadedUrls: Record<string, string> = {},
+): string {
   const L: string[] = [];
-  const urls = generateWorkflowCharts(jobs);
+  const qcUrls = generateWorkflowCharts(jobs);
+
+  /** Pick uploaded URL first, then quickchart fallback. */
+  function imgTag(key: string, alt: string, w: number, h: number): string | undefined {
+    const url = uploadedUrls[key] ?? qcUrls[key];
+    if (!url) return undefined;
+    return `<img src="${url}" alt="${alt}" width="${w}" height="${h}" />`;
+  }
 
   L.push('## 📊 RunnerLens — Workflow Summary\n');
 
-  // Stat cards
-  if (urls['stat-cards']) {
-    L.push(`<img src="${urls['stat-cards']}" alt="Workflow stats" width="600" height="120" />\n`);
-  }
+  const statImg = imgTag('stat-cards', 'Workflow stats', 600, 120);
+  if (statImg) L.push(statImg + '\n');
 
-  // CPU Usage
-  if (urls['cpu-timeline']) {
+  const cpuImg = imgTag('cpu-timeline', 'CPU Timeline', 600, 160);
+  if (cpuImg) {
     L.push('### CPU Usage\n');
-    L.push(`<img src="${urls['cpu-timeline']}" alt="CPU Timeline" width="600" height="160" />\n`);
+    L.push(cpuImg + '\n');
   }
 
-  // Memory Usage
-  if (urls['mem-timeline']) {
+  const memImg = imgTag('mem-timeline', 'Memory Timeline', 600, 160);
+  if (memImg) {
     L.push('### Memory Usage\n');
-    L.push(`<img src="${urls['mem-timeline']}" alt="Memory Timeline" width="600" height="160" />\n`);
+    L.push(memImg + '\n');
   }
 
-  // Execution Timeline (Waterfall)
-  if (urls['waterfall']) {
+  const wfImg = imgTag('waterfall', 'Execution Timeline', 600, 200);
+  if (wfImg) {
     L.push('### Execution Timeline\n');
-    L.push(`<img src="${urls['waterfall']}" alt="Execution Timeline" width="600" height="200" />\n`);
+    L.push(wfImg + '\n');
   }
 
   L.push('---');
@@ -257,15 +264,16 @@ function workflowMarkdownQuickchart(jobs: JobReport[]): string {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Build workflow-level markdown using quickchart.io image URLs.
- * GitHub Job Summary only allows https:// image URLs — inline SVG
- * and data: URIs are stripped by the sanitizer.
+ * Build workflow-level markdown.
+ * Uses uploaded SVG URLs when available for the reference-quality
+ * custom charts, falling back to quickchart.io PNG URLs.
  */
 export function workflowMarkdown(
   jobs: JobReport[],
   _config?: MonitorConfig,
+  uploadedUrls: Record<string, string> = {},
 ): string {
-  return workflowMarkdownQuickchart(jobs);
+  return workflowMarkdownQuickchart(jobs, uploadedUrls);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -287,13 +295,14 @@ export async function runSummary(config: MonitorConfig): Promise<void> {
 
   core.info(`RunnerLens: found ${jobs.length} job report(s): ${jobs.map((j) => j.jobName).join(', ')}`);
 
-  // Upload SVG charts (for external reference / artifacts)
+  // Upload SVG charts and get public URLs
   const svgs = generateWorkflowSvgs(jobs);
+  let uploadedUrls: Record<string, string> = {};
   if (config.githubToken && Object.keys(svgs).length > 0) {
-    await uploadChartSvgs(svgs, config.githubToken);
+    uploadedUrls = await uploadChartSvgs(svgs, config.githubToken);
   }
-  // Build workflow markdown with quickchart.io image URLs
-  const md = workflowMarkdown(jobs, config);
+  // Build workflow markdown with uploaded SVG URLs (quickchart.io fallback)
+  const md = workflowMarkdown(jobs, config, uploadedUrls);
   await core.summary.addRaw(md).write();
   core.info('RunnerLens: workflow summary written to Job Summary');
 

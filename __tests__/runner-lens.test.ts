@@ -150,11 +150,10 @@ describe('processMetrics', () => {
     expect(report.cpu.avg).toBe(45);
     expect(report.memory.total_mb).toBe(7168);
 
-    // SVG charts for upload
+    // Raw SVG charts for upload
     expect(charts['stat-cards']).toBeDefined();
-    expect(charts['stat-cards']).toContain('<img ');
-    const decoded = Buffer.from(charts['stat-cards'].match(/base64,([^"]+)/)![1], 'base64').toString('utf8');
-    expect(decoded).toContain('AMD EPYC');
+    expect(charts['stat-cards']).toContain('<svg');
+    expect(charts['stat-cards']).toContain('AMD EPYC');
   });
 
   it('renders quickchart image URLs in job markdown', () => {
@@ -221,7 +220,7 @@ describe('processMetrics', () => {
     const minimal = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30);
     // SVG charts
     expect(full.charts['timeline']).toBeDefined();
-    expect(full.charts['timeline']).toContain('<img ');
+    expect(full.charts['timeline']).toContain('<svg');
     expect(minimal.charts['timeline']).toBeUndefined();
   });
 
@@ -359,7 +358,7 @@ describe('per-step markdown', () => {
     ];
     const { charts } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
     expect(charts['step-chart']).toBeDefined();
-    expect(charts['step-chart']).toContain('<img ');
+    expect(charts['step-chart']).toContain('<svg');
   });
 
   it('omits per-step table when no steps', () => {

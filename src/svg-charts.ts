@@ -46,6 +46,19 @@ function injectFonts(svg: string): string {
 }
 
 /**
+ * Process an SVG for standalone use: resolve CSS variables to static
+ * color values, inject font-family into text elements, and strip
+ * <style> blocks.  Returns the raw SVG string (not wrapped in <img>).
+ */
+export function resolvedSvg(svg: string): string {
+  let resolved = resolveVars(svg);
+  resolved = injectFonts(resolved);
+  resolved = resolved.replace(/<style>[\s\S]*?<\/style>/g, '');
+  resolved = resolved.replace(/<defs>\s*<\/defs>/g, '');
+  return resolved;
+}
+
+/**
  * Embed an SVG as a base64 <img> tag for GitHub Job Summary.
  * GitHub's HTML sanitizer strips inline <svg> elements, so we encode
  * the SVG as a data-URI and use an <img> tag which GitHub allows.

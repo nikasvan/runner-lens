@@ -5,7 +5,7 @@ import type {
 import { stats, safeMax, safePct } from './stats';
 import { fmtDuration } from './charts';
 import {
-  svgImg, statCards, timelineChart, stepBarChart,
+  resolvedSvg, statCards, timelineChart, stepBarChart,
 } from './svg-charts';
 import {
   statCardChartUrl, timelineChartUrl, barChartUrl,
@@ -96,7 +96,7 @@ function aggregate(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Generate SVG charts for upload (primary)
+// Generate SVG charts for upload (raw SVG strings)
 // ─────────────────────────────────────────────────────────────
 
 function generateSvgCharts(
@@ -114,12 +114,12 @@ function generateSvgCharts(
   const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
 
   // Stat cards
-  charts['stat-cards'] = svgImg(statCards([
+  charts['stat-cards'] = resolvedSvg(statCards([
     { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
     { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, colorVar: 'accent-cyan' },
     { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, colorVar: 'accent-blue' },
     { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
-  ]), 'Stats');
+  ]));
 
   // Per-step bar chart
   if (report.steps && report.steps.length > 0) {
@@ -127,7 +127,7 @@ function generateSvgCharts(
       report.steps.map(s => ({ name: s.name, value: s.duration_seconds })),
       { formatValue: fmtDuration },
     );
-    if (svg) charts['step-chart'] = svgImg(svg, 'Per-step durations');
+    if (svg) charts['step-chart'] = resolvedSvg(svg);
   }
 
   // Timeline chart
@@ -139,7 +139,7 @@ function generateSvgCharts(
         cpuAvg: cpuAvgPct,
         memAvg: memAvgPct,
       });
-      if (svg) charts['timeline'] = svgImg(svg, 'CPU & Memory Timeline');
+      if (svg) charts['timeline'] = resolvedSvg(svg);
     }
   }
 
@@ -208,34 +208,56 @@ function generateQuickchartImgs(
 
 // ─────────────────────────────────────────────────────────────
 // Markdown builder
+// Uses uploaded SVG URLs if available, otherwise falls back to
+// quickchart.io PNG image URLs. Both produce <img src="https://...">
+// tags which GitHub Job Summary renders correctly.
 // ─────────────────────────────────────────────────────────────
+
+/** Build an <img> tag for a chart, preferring uploaded URL over quickchart fallback. */
+function chartImg(
+  uploadedUrls: Record<string, string>,
+  key: string,
+  quickchartFallback: string | undefined,
+  alt: string,
+  width: number,
+  height: number,
+): string | undefined {
+  const url = uploadedUrls[key] ?? quickchartFallback;
+  if (!url) return undefined;
+  return `<img src="${url}" alt="${alt}" width="${width}" height="${height}" />`;
+}
 
 function markdown(
   report: AggregatedReport,
   samples: MetricSample[],
   config: MonitorConfig,
+  uploadedUrls: Record<string, string> = {},
 ): string {
   const L: string[] = [];
-  const charts = generateQuickchartImgs(report, samples, config);
+
+  // Generate quickchart fallback URLs
+  const qc = generateQuickchartImgs(report, samples, config);
 
   // ── Header ──────────────────────────────────────────────
   L.push('## 📊 RunnerLens\n');
 
   // ── Stat cards ─────────────────────────────────────────
-  if (charts['stat-cards']) {
-    L.push(charts['stat-cards'] + '\n');
-  }
+  const statImg = chartImg(uploadedUrls, 'stat-cards', qc['stat-cards'], 'Stats', 600, 120);
+  if (statImg) L.push(statImg + '\n');
 
   // ── Per-step bar chart ─────────────────────────────────
-  if (charts['step-chart']) {
+  const stepH = report.steps ? Math.max(100, report.steps.length * 28 + 30) : 200;
+  const stepImg = chartImg(uploadedUrls, 'step-chart', qc['step-chart'], 'Per-step durations', 600, stepH);
+  if (stepImg) {
     L.push('### Steps\n');
-    L.push(charts['step-chart'] + '\n');
+    L.push(stepImg + '\n');
   }
 
   // ── Timeline ──────────────────────────────────────────
-  if (charts['timeline']) {
+  const tlImg = chartImg(uploadedUrls, 'timeline', qc['timeline'], 'CPU &amp; Memory Timeline', 600, 172);
+  if (tlImg) {
     L.push('### Timeline\n');
-    L.push(charts['timeline'] + '\n');
+    L.push(tlImg + '\n');
   }
 
   // ── Footer ─────────────────────────────────────────────
@@ -266,7 +288,7 @@ export function processMetrics(
   steps?: StepMetrics[],
 ): {
   report: AggregatedReport;
-  charts: Record<string, string>;    // SVG strings for upload
+  charts: Record<string, string>;    // Raw SVG strings for upload
 } {
   const report = aggregate(samples, sysInfo, durationSec, steps);
   if (config.summaryStyle === 'none') {
@@ -277,15 +299,17 @@ export function processMetrics(
 }
 
 /**
- * Build the per-job markdown summary using quickchart.io image URLs.
- * GitHub Job Summary only allows https:// image URLs — inline SVG
- * and data: URIs are stripped by the sanitizer.
+ * Build the per-job markdown summary.
+ * Uses uploaded SVG URLs when available (producing <img src="https://...">),
+ * falling back to quickchart.io PNG image URLs.
+ * Both approaches produce https:// URLs that GitHub Job Summary renders.
  */
 export function buildJobMarkdown(
   report: AggregatedReport,
   samples: MetricSample[],
   config: MonitorConfig,
+  uploadedUrls: Record<string, string> = {},
 ): string {
   if (config.summaryStyle === 'none') return '';
-  return markdown(report, samples, config);
+  return markdown(report, samples, config, uploadedUrls);
 }

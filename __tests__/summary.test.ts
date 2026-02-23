@@ -17,12 +17,6 @@ function decodeChartsInMarkdown(md: string): string {
   return matches.map(m => decodeURIComponent(m[1])).join('\n');
 }
 
-/** Decode all base64 SVG <img> tags and return the raw SVG text. */
-function decodeSvgsInMarkdown(md: string): string {
-  const matches = [...md.matchAll(/base64,([^"]+)/g)];
-  return matches.map(m => Buffer.from(m[1], 'base64').toString('utf8')).join('\n');
-}
-
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
@@ -81,16 +75,16 @@ describe('generateWorkflowSvgs', () => {
   it('generates stat-cards SVG', () => {
     const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
     expect(svgs['stat-cards']).toBeDefined();
-    expect(svgs['stat-cards']).toContain('<img ');
-    expect(decodeSvgsInMarkdown(svgs['stat-cards'])).toContain('AMD EPYC');
+    expect(svgs['stat-cards']).toContain('<svg');
+    expect(svgs['stat-cards']).toContain('AMD EPYC');
   });
 
   it('generates CPU and memory timeline SVGs', () => {
     const svgs = generateWorkflowSvgs([makeJob('build'), makeJob('test')]);
     expect(svgs['cpu-timeline']).toBeDefined();
-    expect(svgs['cpu-timeline']).toContain('<img ');
+    expect(svgs['cpu-timeline']).toContain('<svg');
     expect(svgs['mem-timeline']).toBeDefined();
-    expect(svgs['mem-timeline']).toContain('<img ');
+    expect(svgs['mem-timeline']).toContain('<svg');
   });
 
   it('generates waterfall SVG when steps exist', () => {
@@ -101,7 +95,7 @@ describe('generateWorkflowSvgs', () => {
       ],
     })]);
     expect(svgs['waterfall']).toBeDefined();
-    expect(svgs['waterfall']).toContain('<img ');
+    expect(svgs['waterfall']).toContain('<svg');
   });
 
   it('omits waterfall when no steps exist', () => {

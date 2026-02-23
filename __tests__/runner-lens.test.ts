@@ -2,10 +2,8 @@
 // RunnerLens — Test Suite
 // ─────────────────────────────────────────────────────────────
 
-import { stats, safeMax, safeMin, safePct } from '../src/stats';
-import { sparkline, intensityBar, fmtBytes, fmtDuration, progressBar, statusDot } from '../src/charts';
-import { evaluateAlerts } from '../src/alerts';
-import { recommend } from '../src/recommendations';
+import { stats, safeMax, safePct } from '../src/stats';
+import { fmtDuration, statusDot } from '../src/charts';
 import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import type {
@@ -51,6 +49,7 @@ function makeSysInfo(): SystemInfo {
 
 function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
   return {
+    mode: 'monitor',
     sampleInterval: 3,
     includeProcesses: true,
     summaryStyle: 'full',
@@ -112,13 +111,6 @@ describe('safeMax', () => {
   });
 });
 
-describe('safeMin', () => {
-  it('finds min on large arrays', () => {
-    const big = Array.from({ length: 200_000 }, (_, i) => i);
-    expect(safeMin(big)).toBe(0);
-  });
-});
-
 describe('safePct', () => {
   it('returns 0 when denominator is 0', () => {
     expect(safePct(100, 0)).toBe(0);
@@ -133,56 +125,10 @@ describe('safePct', () => {
 // charts.ts
 // ─────────────────────────────────────────────────────────────
 
-describe('sparkline', () => {
-  it('returns empty string for < 2 values', () => {
-    expect(sparkline([])).toBe('');
-    expect(sparkline([42])).toBe('');
-  });
-
-  it('produces characters from the spark set', () => {
-    const line = sparkline([0, 25, 50, 75, 100], 5);
-    expect(line).toHaveLength(5);
-    expect(line).toMatch(/^[▁▂▃▄▅▆▇█]+$/);
-  });
-
-  it('resamples long arrays without crashing', () => {
-    const values = Array.from({ length: 1000 }, () => Math.random() * 100);
-    const line = sparkline(values, 52);
-    expect(line).toHaveLength(52);
-  });
-});
-
-describe('intensityBar', () => {
-  it('produces block characters', () => {
-    const bar = intensityBar([10, 30, 50, 70, 90], 5);
-    expect(bar).toHaveLength(5);
-  });
-});
-
-describe('progressBar', () => {
-  it('produces correct width', () => {
-    expect(progressBar(50, 10)).toHaveLength(10);
-    expect(progressBar(0, 10)).toBe('░░░░░░░░░░');
-    expect(progressBar(100, 10)).toBe('██████████');
-  });
-
-  it('clamps values', () => {
-    expect(progressBar(-10, 5)).toBe('░░░░░');
-    expect(progressBar(200, 5)).toBe('█████');
-  });
-});
-
 describe('statusDot', () => {
   it('returns green for low values', () => expect(statusDot(50)).toBe('🟢'));
   it('returns yellow for warning', () => expect(statusDot(85)).toBe('🟡'));
   it('returns red for critical', () => expect(statusDot(96)).toBe('🔴'));
-});
-
-describe('fmtBytes', () => {
-  it('formats zero', () => expect(fmtBytes(0)).toBe('0 B'));
-  it('formats KB', () => expect(fmtBytes(1024)).toBe('1 KB'));
-  it('formats MB', () => expect(fmtBytes(1.5 * 1024 * 1024)).toBe('1.5 MB'));
-  it('formats GB', () => expect(fmtBytes(2.3 * 1024 ** 3)).toBe('2.3 GB'));
 });
 
 describe('fmtDuration', () => {
@@ -190,94 +136,6 @@ describe('fmtDuration', () => {
   it('formats minutes', () => expect(fmtDuration(125)).toBe('2m 5s'));
   it('formats hours', () => expect(fmtDuration(3723)).toBe('1h 2m'));
   it('formats exact minutes', () => expect(fmtDuration(120)).toBe('2m'));
-});
-
-// ─────────────────────────────────────────────────────────────
-// alerts.ts
-// ─────────────────────────────────────────────────────────────
-
-describe('evaluateAlerts', () => {
-  it('returns no alerts when everything is healthy', () => {
-    const samples = [makeSample(), makeSample()];
-    const cpuStats = stats(samples.map((s) => s.cpu.usage));
-    const memStats = stats(samples.map((s) => s.memory.used_mb));
-    const alerts = evaluateAlerts(samples, makeConfig(), cpuStats, memStats, 7168);
-    expect(alerts).toEqual([]);
-  });
-
-  it('raises critical CPU alert when average exceeds critical threshold', () => {
-    const sample = makeSample({ cpu: { user: 90, system: 5, idle: 3, iowait: 1, steal: 1, usage: 97 } });
-    const samples = Array(20).fill(sample);
-    const cpuStats = stats(samples.map((s) => s.cpu.usage));
-    const memStats = stats(samples.map((s) => s.memory.used_mb));
-    const alerts = evaluateAlerts(samples, makeConfig(), cpuStats, memStats, 7168);
-    expect(alerts.some((a) => a.level === 'critical' && a.metric === 'CPU')).toBe(true);
-  });
-
-  it('raises swap warning when swap is used across >10% of samples', () => {
-    const swapSample = makeSample({
-      memory: { total_mb: 7168, used_mb: 6800, available_mb: 368, cached_mb: 128, swap_total_mb: 2048, swap_used_mb: 512, usage_pct: 94.9 },
-    });
-    const normalSample = makeSample();
-    // 3 out of 5 = 60% → should trigger
-    const samples = [swapSample, swapSample, swapSample, normalSample, normalSample];
-    const cpuStats = stats(samples.map((s) => s.cpu.usage));
-    const memStats = stats(samples.map((s) => s.memory.used_mb));
-    const alerts = evaluateAlerts(samples, makeConfig(), cpuStats, memStats, 7168);
-    expect(alerts.some((a) => a.metric === 'Swap')).toBe(true);
-  });
-
-  it('returns empty array for empty samples', () => {
-    const cpuStats = stats([]);
-    const memStats = stats([]);
-    expect(evaluateAlerts([], makeConfig(), cpuStats, memStats, 0)).toEqual([]);
-  });
-
-  it('handles zero memTotal without division by zero', () => {
-    const samples = [makeSample()];
-    const cpuStats = stats(samples.map((s) => s.cpu.usage));
-    const memStats = stats(samples.map((s) => s.memory.used_mb));
-    // memTotalMb = 0 → safePct should return 0, no NaN
-    const alerts = evaluateAlerts(samples, makeConfig(), cpuStats, memStats, 0);
-    expect(alerts.every((a) => !isNaN(a.value))).toBe(true);
-  });
-
-});
-
-// ─────────────────────────────────────────────────────────────
-// recommendations.ts
-// ─────────────────────────────────────────────────────────────
-
-describe('recommend', () => {
-  it('recommends smaller runner when resources are underused', () => {
-    const sample = makeSample({
-      cpu: { user: 5, system: 3, idle: 90, iowait: 1, steal: 1, usage: 10 },
-      memory: { total_mb: 7168, used_mb: 1024, available_mb: 6144, cached_mb: 512, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 14.3 },
-    });
-    const { report } = processMetrics([sample, sample], makeSysInfo(), makeConfig(), 60);
-    expect(report.recommendations.some((r) => r.includes('Oversized'))).toBe(true);
-  });
-
-  it('recommends larger runner when CPU is saturated on 2-core', () => {
-    const sample = makeSample({
-      cpu: { user: 85, system: 10, idle: 3, iowait: 1, steal: 1, usage: 97 },
-    });
-    const samples = Array(20).fill(sample);
-    const sysInfo = makeSysInfo(); // 2 cores
-    const { report } = processMetrics(samples, sysInfo, makeConfig(), 120);
-    expect(report.recommendations.some((r) => r.includes('CPU saturated'))).toBe(true);
-  });
-
-  it('returns empty for empty samples', () => {
-    expect(recommend({
-      version: '1.0.0', system: makeSysInfo(),
-      duration_seconds: 0, sample_count: 0,
-      started_at: '', ended_at: '',
-      cpu: stats([]), memory: { ...stats([]), total_mb: 0, swap_max_mb: 0 },
-      load: { avg_1m: 0, max_1m: 0 },
-      top_processes: [], alerts: [], recommendations: [],
-    }, [])).toEqual([]);
-  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -304,7 +162,7 @@ describe('processMetrics', () => {
     expect(markdown).toContain('Dashboard');
     expect(markdown).toContain('**CPU**');
     expect(markdown).toContain('**Memory**');
-    expect(markdown).toContain('█'); // progress bars
+    expect(markdown).toContain('data:image/svg+xml;base64,'); // SVG gauge charts
   });
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
@@ -351,6 +209,35 @@ describe('processMetrics', () => {
     const minimal = processMetrics(samples, makeSysInfo(), makeConfig({ summaryStyle: 'minimal' }), 30);
     expect(full.markdown).toContain('Timeline');
     expect(minimal.markdown).not.toContain('Timeline');
+  });
+
+  it('includes timeline with correct length for multiple samples', () => {
+    const samples = Array(100).fill(null).map((_, i) =>
+      makeSample({
+        timestamp: 1700000000 + i * 3,
+        cpu: { user: 30, system: 10, idle: 55, iowait: 3, steal: 2, usage: 40 + i * 0.5 },
+        memory: { total_mb: 7168, used_mb: 2000 + i * 10, available_mb: 5168, cached_mb: 1024, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 30 },
+      }),
+    );
+    const { report } = processMetrics(samples, makeSysInfo(), makeConfig(), 300);
+    expect(report.timeline).toBeDefined();
+    expect(report.timeline!.cpu_pct).toHaveLength(80);
+    expect(report.timeline!.mem_mb).toHaveLength(80);
+  });
+
+  it('omits timeline for single sample', () => {
+    const { report } = processMetrics([makeSample()], makeSysInfo(), makeConfig(), 3);
+    expect(report.timeline).toBeUndefined();
+  });
+
+  it('includes timeline with original length when fewer than 80 samples', () => {
+    const samples = Array(10).fill(null).map((_, i) =>
+      makeSample({ timestamp: 1700000000 + i * 3 }),
+    );
+    const { report } = processMetrics(samples, makeSysInfo(), makeConfig(), 30);
+    expect(report.timeline).toBeDefined();
+    expect(report.timeline!.cpu_pct).toHaveLength(10);
+    expect(report.timeline!.mem_mb).toHaveLength(10);
   });
 });
 

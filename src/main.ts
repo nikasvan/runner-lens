@@ -12,6 +12,13 @@ async function run(): Promise<void> {
   try {
     const cfg = parseConfig();
 
+    // ── Summarize mode: skip collector, just enable post step ──
+    if (cfg.mode === 'summarize') {
+      core.saveState(STATE.ACTIVE, 'true');
+      core.info('RunnerLens: summarize mode — skipping collector');
+      return;
+    }
+
     // ── Prepare workspace ─────────────────────────────────
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(START_TS_FILE, Date.now().toString());
@@ -41,12 +48,11 @@ async function run(): Promise<void> {
       scriptPath,
       METRICS_FILE,
       cfg.sampleInterval.toString(),
+      `--max-size=${cfg.maxSizeMb}`,
     ];
-    if (!cfg.includeProcesses) args.push('--no-processes');
-    args.push(`--max-size=${cfg.maxSizeMb}`);
 
     // ── Spawn collector (detached, won't block the job) ───
-    const child = spawn('bash', args, {
+    const child = spawn('sh', args, {
       detached: true,
       stdio: 'ignore',
     });

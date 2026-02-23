@@ -3,15 +3,29 @@ import type {
   AggregatedReport, ProcessInfo, StepMetrics,
 } from './types';
 import { stats, safeMax, safePct } from './stats';
-import { evaluateAlerts } from './alerts';
-import { recommend } from './recommendations';
-import { sparkline, progressBar, statusDot, fmtDuration } from './charts';
+import { statusDot, fmtDuration } from './charts';
+import { timelineChart, gaugeChart, stepBarChart, svgImg } from './svg-charts';
 import { REPORT_VERSION } from './constants';
+
+const TIMELINE_POINTS = 80;
+
+function downsample(values: number[], n: number): number[] {
+  if (values.length <= n) return values;
+  const out: number[] = [];
+  const step = (values.length - 1) / (n - 1);
+  for (let i = 0; i < n; i++) {
+    const pos = i * step;
+    const lo = Math.floor(pos);
+    const hi = Math.min(lo + 1, values.length - 1);
+    const frac = pos - lo;
+    out.push(+(values[lo] * (1 - frac) + values[hi] * frac).toFixed(1));
+  }
+  return out;
+}
 
 function aggregate(
   samples: MetricSample[],
   sysInfo: SystemInfo,
-  config: MonitorConfig,
   durationSec: number,
   steps?: StepMetrics[],
 ): AggregatedReport {
@@ -49,7 +63,10 @@ function aggregate(
     };
   }
 
-  const alerts = evaluateAlerts(samples, config, cpuStats, memStats, memTotal);
+  const timeline = samples.length >= 2 ? {
+    cpu_pct: downsample(samples.map(s => s.cpu.usage), TIMELINE_POINTS),
+    mem_mb: downsample(samples.map(s => s.memory.used_mb), TIMELINE_POINTS),
+  } : undefined;
 
   const report: AggregatedReport = {
     version: REPORT_VERSION,
@@ -65,25 +82,17 @@ function aggregate(
       max_1m: safeMax(loadVals),
     },
     top_processes: topProcs,
-    alerts,
-    recommendations: [],
     ...(steps && steps.length > 0 ? { steps } : {}),
+    ...(timeline ? { timeline } : {}),
     ...(collector ? { collector } : {}),
   };
 
-  report.recommendations = recommend(report, samples);
   return report;
 }
 
 // ─────────────────────────────────────────────────────────────
 // Markdown — redesigned for readability
 // ─────────────────────────────────────────────────────────────
-
-function badge(report: AggregatedReport): string {
-  if (report.alerts.some((a) => a.level === 'critical')) return '🔴 Critical';
-  if (report.alerts.some((a) => a.level === 'warning'))  return '🟡 Warning';
-  return '🟢 Healthy';
-}
 
 function markdown(
   report: AggregatedReport,
@@ -99,29 +108,14 @@ function markdown(
   const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
   const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
 
-  // ── Header: status + runner summary on one line ────────
+  // ── Header: runner summary on one line ─────────────────
   L.push('## 📊 RunnerLens\n');
   L.push(
-    `**${badge(report)}** · ` +
     `${report.system.cpu_count} cores · ` +
     `${(report.system.total_memory_mb / 1024).toFixed(1)} GB RAM · ` +
     `${fmtDuration(report.duration_seconds)} · ` +
     `${report.sample_count} samples\n`,
   );
-
-  // ── Action items first (recommendations + alerts) ──────
-  const actions = [
-    ...report.recommendations,
-    ...(report.memory.swap_max_mb > 0
-      ? [`⚠️ **Swap detected** — peak ${report.memory.swap_max_mb} MB. Your job is running out of memory.`]
-      : []),
-  ];
-
-  if (actions.length > 0) {
-    L.push('### ⚡ Action Required\n');
-    for (const a of actions) L.push(`${a}\n`);
-    L.push('');
-  }
 
   // ── Dashboard: visual overview table ───────────────────
   L.push('### Dashboard\n');
@@ -129,10 +123,11 @@ function markdown(
   L.push('|:---:|---|---|---|---|');
 
   // CPU row
+  const cpuGauge = svgImg(gaugeChart(cpuAvgPct, { warn: config.thresholds.cpu_warn, crit: config.thresholds.cpu_crit, label: 'CPU' }), 'CPU gauge', 60, 60);
   L.push(
     `| ${statusDot(cpuAvgPct, config.thresholds.cpu_warn, config.thresholds.cpu_crit)} ` +
     `| **CPU** ` +
-    `| \`${progressBar(cpuAvgPct)}\` **${cpuAvgPct.toFixed(0)}%** avg ` +
+    `| ${cpuGauge} **${cpuAvgPct.toFixed(0)}%** avg ` +
     `| ${cpuPeakPct.toFixed(0)}% ` +
     `| p95: ${report.cpu.p95.toFixed(0)}% · p99: ${report.cpu.p99.toFixed(0)}% |`,
   );
@@ -140,10 +135,11 @@ function markdown(
   // Memory row
   const memUsedGB = (report.memory.avg / 1024).toFixed(1);
   const memTotalGB = (report.memory.total_mb / 1024).toFixed(1);
+  const memGauge = svgImg(gaugeChart(memAvgPct, { warn: config.thresholds.mem_warn, crit: config.thresholds.mem_crit, label: 'MEM' }), 'Memory gauge', 60, 60);
   L.push(
     `| ${statusDot(memAvgPct, config.thresholds.mem_warn, config.thresholds.mem_crit)} ` +
     `| **Memory** ` +
-    `| \`${progressBar(memAvgPct)}\` **${memAvgPct.toFixed(0)}%** avg ` +
+    `| ${memGauge} **${memAvgPct.toFixed(0)}%** avg ` +
     `| ${memPeakPct.toFixed(0)}% ` +
     `| ${memUsedGB} / ${memTotalGB} GB |`,
   );
@@ -153,6 +149,11 @@ function markdown(
   // ── Per-step breakdown ───────────────────────────────────
   if (report.steps && report.steps.length > 0) {
     L.push('<details open><summary><strong>📋 Per-Step Breakdown</strong></summary>\n');
+
+    const barData = report.steps.map((s) => ({ name: s.name, value: s.duration_seconds }));
+    const barSvg = stepBarChart(barData, { formatValue: fmtDuration });
+    if (barSvg) L.push(svgImg(barSvg, 'Per-step duration chart', 600) + '\n');
+
     L.push('| # | Step | Duration | CPU avg | CPU peak | Sys Mem avg | Sys Mem peak |');
     L.push('|---:|---|---:|---:|---:|---:|---:|');
     for (const s of report.steps) {
@@ -171,29 +172,14 @@ function markdown(
     L.push('\n</details>\n');
   }
 
-  // ── Alerts (only if not already shown via actions) ─────
-  const pureAlerts = report.alerts.filter((a) =>
-    a.metric !== 'Swap', // swap already shown in actions
-  );
-  if (pureAlerts.length > 0) {
-    L.push('<details open><summary><strong>🚨 Alerts</strong></summary>\n');
-    for (const a of pureAlerts) {
-      const icon = a.level === 'critical' ? '🔴' : a.level === 'warning' ? '🟡' : '🔵';
-      L.push(`${icon} **${a.metric}** — ${a.message}  `);
-    }
-    L.push('\n</details>\n');
-  }
-
-  // ── Timeline sparklines ────────────────────────────────
+  // ── Timeline chart ─────────────────────────────────────
   if (!minimal) {
     const cpuV = samples.map((s) => s.cpu.usage);
     const memV = samples.map((s) => s.memory.usage_pct);
     if (cpuV.length >= 4) {
+      const tlSvg = timelineChart(cpuV, memV, { cpuAvg: cpuAvgPct, memAvg: memAvgPct });
       L.push('<details open><summary><strong>📈 Timeline</strong></summary>\n');
-      L.push('```');
-      L.push(`  CPU  ${sparkline(cpuV, 50)}  ${cpuAvgPct.toFixed(0)}% avg`);
-      L.push(`  MEM  ${sparkline(memV, 50)}  ${memAvgPct.toFixed(0)}% avg`);
-      L.push('```');
+      L.push(svgImg(tlSvg, 'CPU and Memory timeline', 600, 200));
       L.push('\n</details>\n');
     }
   }
@@ -245,7 +231,7 @@ export function processMetrics(
   durationSec: number,
   steps?: StepMetrics[],
 ): { report: AggregatedReport; markdown: string } {
-  const report = aggregate(samples, sysInfo, config, durationSec, steps);
+  const report = aggregate(samples, sysInfo, durationSec, steps);
   const md = config.summaryStyle === 'none' ? '' : markdown(report, samples, config);
   return { report, markdown: md };
 }

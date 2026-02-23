@@ -10,6 +10,10 @@ branding:
   color: 'blue'
 
 inputs:
+  mode:
+    description: 'Action mode: monitor (default) or summarize (workflow-level summary)'
+    required: false
+    default: 'monitor'
   api-key:
     description: 'RunnerLens API key for the SaaS dashboard (optional)'
     required: false

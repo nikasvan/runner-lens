@@ -3,6 +3,7 @@ node_modules/
 coverage/
 .env
 *.tgz
+preview-*
 
 # Do NOT ignore dist/ — the action needs the built JS checked in
 # !dist/

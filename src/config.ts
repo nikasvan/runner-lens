@@ -28,7 +28,11 @@ export function parseConfig(): MonitorConfig {
     || process.env.ACTIONS_RUNTIME_TOKEN
     || '';
 
+  const modeRaw = core.getInput('mode') || 'monitor';
+  const mode = (modeRaw === 'summarize' ? 'summarize' : 'monitor') as MonitorConfig['mode'];
+
   return {
+    mode,
     sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),
     includeProcesses: core.getInput('include-processes') !== 'false',
     summaryStyle,

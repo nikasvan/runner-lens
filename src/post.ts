@@ -9,6 +9,7 @@ import { processMetrics } from './reporter';
 import { sendToApi } from './api-client';
 import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
+import { runSummary } from './summary';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
 } from './constants';
@@ -97,6 +98,14 @@ async function run(): Promise<void> {
       return;
     }
 
+    const config  = parseConfig();
+
+    // ── Summarize mode: aggregate reports from all jobs ───
+    if (config.mode === 'summarize') {
+      await runSummary(config);
+      return;
+    }
+
     // ── Stop collector & flush ────────────────────────────
     stopCollector();
     await new Promise((r) => setTimeout(r, 1200));
@@ -104,7 +113,6 @@ async function run(): Promise<void> {
     // ── Load data ─────────────────────────────────────────
     const samples = loadSamples();
     const sysInfo = loadSystemInfo();
-    const config  = parseConfig();
 
     if (samples.length === 0) {
       core.warning('RunnerLens: no samples collected');
@@ -173,33 +181,31 @@ async function run(): Promise<void> {
     }
 
     // ── Artifact upload ─────────────────────────────────
-    if (core.getInput('upload-artifact') === 'true') {
+    // Always upload report.json so summarize mode can aggregate.
+    // The upload-artifact flag controls whether the larger samples.json is included.
+    {
       try {
+        const jobName = process.env.GITHUB_JOB ?? 'unknown';
+        const artifactName = `runner-lens-${jobName}`;
         const artifactDir = path.join(DATA_DIR, 'artifact');
         fs.mkdirSync(artifactDir, { recursive: true });
 
-        const samplesFile = path.join(artifactDir, 'samples.json');
-        const reportFile  = path.join(artifactDir, 'report.json');
-        fs.writeFileSync(samplesFile, JSON.stringify(samples, null, 2));
-        fs.writeFileSync(reportFile,  JSON.stringify(report, null, 2));
+        const reportFile = path.join(artifactDir, 'report.json');
+        fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
+
+        const files = [reportFile];
+        if (core.getInput('upload-artifact') === 'true') {
+          const samplesFile = path.join(artifactDir, 'samples.json');
+          fs.writeFileSync(samplesFile, JSON.stringify(samples, null, 2));
+          files.push(samplesFile);
+        }
 
         const artifact = new DefaultArtifactClient();
-        await artifact.uploadArtifact(
-          'runner-lens-metrics',
-          [samplesFile, reportFile],
-          artifactDir,
-        );
-        core.info('RunnerLens: metrics uploaded as artifact "runner-lens-metrics"');
+        await artifact.uploadArtifact(artifactName, files, artifactDir);
+        core.info(`RunnerLens: report uploaded as artifact "${artifactName}"`);
       } catch (e) {
         core.warning(`RunnerLens: artifact upload failed — ${e}`);
       }
-    }
-
-    // ── Log alerts ────────────────────────────────────────
-    for (const a of report.alerts) {
-      if (a.level === 'critical')     core.error(`RunnerLens: ${a.message}`);
-      else if (a.level === 'warning') core.warning(`RunnerLens: ${a.message}`);
-      else                            core.notice(`RunnerLens: ${a.message}`);
     }
 
   } catch (err) {

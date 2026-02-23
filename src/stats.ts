@@ -36,15 +36,6 @@ export function safeMax(values: number[], fallback = 0): number {
   return m;
 }
 
-export function safeMin(values: number[], fallback = 0): number {
-  if (values.length === 0) return fallback;
-  let m = values[0];
-  for (let i = 1; i < values.length; i++) {
-    if (values[i] < m) m = values[i];
-  }
-  return m;
-}
-
 /** Safe division — returns 0 when divisor is 0. */
 export function safePct(numerator: number, denominator: number): number {
   return denominator > 0 ? (numerator / denominator) * 100 : 0;

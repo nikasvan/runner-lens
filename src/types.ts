@@ -67,6 +67,7 @@ export interface ThresholdConfig {
 }
 
 export interface MonitorConfig {
+  mode: 'monitor' | 'summarize';
   sampleInterval: number;
   includeProcesses: boolean;
   summaryStyle: 'full' | 'compact' | 'minimal' | 'none';
@@ -85,14 +86,6 @@ export interface MetricStats {
   p95: number;
   p99: number;
   latest: number;
-}
-
-export interface Alert {
-  level: 'info' | 'warning' | 'critical';
-  metric: string;
-  message: string;
-  value: number;
-  threshold: number;
 }
 
 export interface StepMetrics {
@@ -119,11 +112,18 @@ export interface AggregatedReport {
 
   load: { avg_1m: number; max_1m: number };
   top_processes: ProcessInfo[];
-  alerts: Alert[];
-  recommendations: string[];
   steps?: StepMetrics[];
+  timeline?: {
+    cpu_pct: number[];   // downsampled CPU usage %, 0-100
+    mem_mb: number[];    // downsampled memory usage in MB
+  };
   collector?: { avg_cpu_pct: number; avg_mem_mb: number; max_mem_mb: number };
   reporter?: { cpu_pct: number; mem_mb: number };
+}
+
+export interface JobReport {
+  jobName: string;
+  report: AggregatedReport;
 }
 
 export interface IngestPayload {

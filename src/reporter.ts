@@ -147,18 +147,18 @@ function generateSvgCharts(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Generate quickchart.io image URLs for GitHub Job Summary
-// GitHub strips both inline <svg> and data: URIs; only https://
-// image URLs are allowed. quickchart.io renders Chart.js configs
-// as PNG images on-the-fly via GET URLs — no API key required.
+// Markdown builder — uses quickchart.io image URLs
+// GitHub Job Summary only renders <img src="https://...">.
+// quickchart.io encodes Chart.js configs in GET URLs and returns
+// PNG images on the fly — no API key, no uploads, no CDN delays.
 // ─────────────────────────────────────────────────────────────
 
-function generateQuickchartImgs(
+function markdown(
   report: AggregatedReport,
   samples: MetricSample[],
   config: MonitorConfig,
-): Record<string, string> {
-  const imgs: Record<string, string> = {};
+): string {
+  const L: string[] = [];
   const minimal = config.summaryStyle === 'minimal';
   const sys = report.system;
 
@@ -167,7 +167,10 @@ function generateQuickchartImgs(
   const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
   const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
 
-  // Stat cards
+  // ── Header ──────────────────────────────────────────────
+  L.push('## 📊 RunnerLens\n');
+
+  // ── Stat cards ─────────────────────────────────────────
   const statUrl = statCardChartUrl({
     runner: `${sys.cpu_count} × ${sys.cpu_model}`,
     runnerSub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`,
@@ -179,18 +182,19 @@ function generateQuickchartImgs(
     memPeakPct,
     memPeakGb: `${(report.memory.max / 1024).toFixed(1)} GB`,
   });
-  imgs['stat-cards'] = `<img src="${statUrl}" alt="Stats" width="600" height="120" />`;
+  L.push(`<img src="${statUrl}" alt="Stats" width="600" height="120" />\n`);
 
-  // Per-step bar chart
+  // ── Per-step bar chart ─────────────────────────────────
   if (report.steps && report.steps.length > 0) {
     const barUrl = barChartUrl(
       report.steps.map(s => ({ name: s.name, durationSec: s.duration_seconds })),
     );
     const h = Math.max(100, report.steps.length * 28 + 30);
-    imgs['step-chart'] = `<img src="${barUrl}" alt="Per-step durations" width="600" height="${h}" />`;
+    L.push('### Steps\n');
+    L.push(`<img src="${barUrl}" alt="Per-step durations" width="600" height="${h}" />\n`);
   }
 
-  // Timeline chart
+  // ── Timeline ──────────────────────────────────────────
   if (!minimal) {
     const cpuV = samples.map(s => s.cpu.usage);
     const memV = samples.map(s => s.memory.usage_pct);
@@ -199,65 +203,9 @@ function generateQuickchartImgs(
         cpuAvg: cpuAvgPct,
         memAvg: memAvgPct,
       });
-      imgs['timeline'] = `<img src="${tlUrl}" alt="CPU &amp; Memory Timeline" width="600" height="200" />`;
+      L.push('### Timeline\n');
+      L.push(`<img src="${tlUrl}" alt="CPU &amp; Memory Timeline" width="600" height="200" />\n`);
     }
-  }
-
-  return imgs;
-}
-
-// ─────────────────────────────────────────────────────────────
-// Markdown builder
-// Uses uploaded SVG URLs if available, otherwise falls back to
-// quickchart.io PNG image URLs. Both produce <img src="https://...">
-// tags which GitHub Job Summary renders correctly.
-// ─────────────────────────────────────────────────────────────
-
-/** Build an <img> tag for a chart, preferring uploaded URL over quickchart fallback. */
-function chartImg(
-  uploadedUrls: Record<string, string>,
-  key: string,
-  quickchartFallback: string | undefined,
-  alt: string,
-  width: number,
-  height: number,
-): string | undefined {
-  const url = uploadedUrls[key] ?? quickchartFallback;
-  if (!url) return undefined;
-  return `<img src="${url}" alt="${alt}" width="${width}" height="${height}" />`;
-}
-
-function markdown(
-  report: AggregatedReport,
-  samples: MetricSample[],
-  config: MonitorConfig,
-  uploadedUrls: Record<string, string> = {},
-): string {
-  const L: string[] = [];
-
-  // Generate quickchart fallback URLs
-  const qc = generateQuickchartImgs(report, samples, config);
-
-  // ── Header ──────────────────────────────────────────────
-  L.push('## 📊 RunnerLens\n');
-
-  // ── Stat cards ─────────────────────────────────────────
-  const statImg = chartImg(uploadedUrls, 'stat-cards', qc['stat-cards'], 'Stats', 600, 120);
-  if (statImg) L.push(statImg + '\n');
-
-  // ── Per-step bar chart ─────────────────────────────────
-  const stepH = report.steps ? Math.max(100, report.steps.length * 28 + 30) : 200;
-  const stepImg = chartImg(uploadedUrls, 'step-chart', qc['step-chart'], 'Per-step durations', 600, stepH);
-  if (stepImg) {
-    L.push('### Steps\n');
-    L.push(stepImg + '\n');
-  }
-
-  // ── Timeline ──────────────────────────────────────────
-  const tlImg = chartImg(uploadedUrls, 'timeline', qc['timeline'], 'CPU &amp; Memory Timeline', 600, 172);
-  if (tlImg) {
-    L.push('### Timeline\n');
-    L.push(tlImg + '\n');
   }
 
   // ── Footer ─────────────────────────────────────────────
@@ -299,17 +247,14 @@ export function processMetrics(
 }
 
 /**
- * Build the per-job markdown summary.
- * Uses uploaded SVG URLs when available (producing <img src="https://...">),
- * falling back to quickchart.io PNG image URLs.
- * Both approaches produce https:// URLs that GitHub Job Summary renders.
+ * Build the per-job markdown summary using quickchart.io image URLs.
+ * GitHub Job Summary only renders <img src="https://..."> tags.
  */
 export function buildJobMarkdown(
   report: AggregatedReport,
   samples: MetricSample[],
   config: MonitorConfig,
-  uploadedUrls: Record<string, string> = {},
 ): string {
   if (config.summaryStyle === 'none') return '';
-  return markdown(report, samples, config, uploadedUrls);
+  return markdown(report, samples, config);
 }

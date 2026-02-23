@@ -18,7 +18,7 @@ Module._load = function(request, parent, isMain) {
 
 require('ts-node').register({ transpileOnly: true, compilerOptions: { module: 'commonjs', esModuleInterop: true, resolveJsonModule: true } });
 
-const { workflowMarkdown, generateWorkflowSvgs } = require('./src/summary');
+const { workflowMarkdown } = require('./src/summary');
 
 function makeReport(name, startMin, dur, cpu, mem) {
   const t0 = new Date(`2024-11-14T22:${String(startMin).padStart(2,'0')}:00Z`);
@@ -65,14 +65,7 @@ const jobs = [
 ];
 
 const cfg = {mode:'summarize',sampleInterval:3,summaryStyle:'full',maxSizeMb:100,apiKey:'',apiEndpoint:'',githubToken:''};
-
-// Generate raw SVGs and create data URI "uploaded URLs" for preview
-const svgs = generateWorkflowSvgs(jobs);
-const fakeUrls = {};
-for (const [name, svg] of Object.entries(svgs)) {
-  fakeUrls[name] = 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
-}
-const md = workflowMarkdown(jobs, cfg, fakeUrls);
+const md = workflowMarkdown(jobs, cfg);
 
 const html = `<!DOCTYPE html>
 <html lang="en">

@@ -169,13 +169,12 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Upload SVG charts (for external reference / artifacts) ──
-    let uploadedUrls: Record<string, string> = {};
+    // ── Upload SVG charts as artifacts (for external reference) ──
     if (config.githubToken && Object.keys(charts).length > 0) {
-      uploadedUrls = await uploadChartSvgs(charts, config.githubToken);
+      await uploadChartSvgs(charts, config.githubToken);
     }
-    // Build per-job markdown with uploaded SVG URLs (quickchart.io fallback)
-    const markdown = buildJobMarkdown(report, samples, config, uploadedUrls);
+    // Build per-job markdown with quickchart.io image URLs
+    const markdown = buildJobMarkdown(report, samples, config);
 
     if (markdown) {
       await core.summary.addRaw(markdown).write();

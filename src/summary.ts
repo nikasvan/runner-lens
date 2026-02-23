@@ -10,10 +10,9 @@ import type { MonitorConfig, JobReport, AggregatedReport } from './types';
 import { safePct } from './stats';
 import { fmtDuration } from './charts';
 import {
-  svgImg, statCards, workflowTimelineChart, waterfallChart,
+  svgImg, svgToDataImg, statCards, workflowTimelineChart, waterfallChart,
   type TimelineSegment,
 } from './svg-charts';
-import { htmlStatCards, htmlTimeline, htmlWaterfall } from './html-charts';
 import { statCardChartUrl, waterfallChartUrl, workflowTimelineUrl } from './quickchart';
 import { uploadChartSvgs } from './svg-upload';
 import { REPORT_VERSION } from './constants';
@@ -211,65 +210,31 @@ export function generateWorkflowCharts(jobs: JobReport[]): Record<string, string
 }
 
 // ─────────────────────────────────────────────────────────────
-// Build workflow markdown with HTML tables
+// Build workflow markdown with SVG data URI images
 // ─────────────────────────────────────────────────────────────
 
-function workflowMarkdownHtml(jobs: JobReport[]): string {
+function workflowMarkdownHtml(_jobs: JobReport[], svgs: Record<string, string>): string {
   const L: string[] = [];
-  const a = aggregateStats(jobs);
 
   L.push('## 📊 RunnerLens — Workflow Summary\n');
 
-  L.push(htmlStatCards([
-    { label: 'Runner', value: `${a.sys.cpu_count} × ${a.sys.cpu_model}`, sub: `${(a.sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${a.sys.runner_os}`, color: '#39d2c0' },
-    { label: 'Duration', value: fmtDuration(a.totalDuration), sub: a.jobLabel, color: '#3fb950' },
-    { label: 'Avg CPU', value: `${a.weightedCpuAvg.toFixed(0)}%`, sub: `peak ${a.cpuPeak.toFixed(0)}%`, color: '#58a6ff' },
-    { label: 'Memory', value: `${a.memAvgPct.toFixed(0)}% avg`, sub: `peak ${a.memPeakPct.toFixed(0)}% · ${(a.memPeak / 1024).toFixed(1)} GB`, color: '#bc8cff' },
-  ]) + '\n');
-
-  const sorted = [...jobs].sort((a, b) =>
-    new Date(a.report.started_at).getTime() - new Date(b.report.started_at).getTime(),
-  );
-
-  // CPU & Memory Timeline Sparklines
-  const cpuSegments = sorted.filter(j => j.report.timeline).flatMap(j => j.report.timeline!.cpu_pct);
-  const memSegments = sorted.filter(j => j.report.timeline).flatMap(j => j.report.timeline!.mem_mb);
-
-  if (cpuSegments.length >= 2 || memSegments.length >= 2) {
-    const rows = [];
-    if (cpuSegments.length >= 2) {
-      rows.push({ label: 'CPU', values: cpuSegments, avg: `${a.weightedCpuAvg.toFixed(0)}% avg` });
-    }
-    if (memSegments.length >= 2) {
-      const memPctValues = memSegments.map(v => a.totalMb > 0 ? (v / a.totalMb) * 100 : 0);
-      rows.push({ label: 'Memory', values: memPctValues, avg: `${a.memAvgPct.toFixed(0)}% avg` });
-    }
-    L.push('### Timeline\n');
-    L.push(htmlTimeline(rows) + '\n');
+  if (svgs['stat-cards']) {
+    L.push(svgToDataImg(svgs['stat-cards'], 'Workflow stats') + '\n');
   }
 
-  // Execution Timeline (Waterfall)
-  const hasSteps = sorted.some(j => j.report.steps && j.report.steps.length > 0);
-  if (hasSteps) {
-    const workflowStart = Math.min(...sorted.map(j => new Date(j.report.started_at).getTime()));
-    const wfRows = [];
-    for (const j of sorted) {
-      if (!j.report.steps) continue;
-      const jobOffset = (new Date(j.report.started_at).getTime() - workflowStart) / 1000;
-      let cumSec = 0;
-      for (const s of j.report.steps) {
-        wfRows.push({
-          job: j.jobName,
-          step: s.name,
-          startSec: jobOffset + cumSec,
-          durationSec: s.duration_seconds,
-        });
-        cumSec += s.duration_seconds;
-      }
-    }
+  if (svgs['cpu-timeline']) {
+    L.push('### CPU Usage\n');
+    L.push(svgToDataImg(svgs['cpu-timeline'], 'CPU Timeline') + '\n');
+  }
 
+  if (svgs['mem-timeline']) {
+    L.push('### Memory Usage\n');
+    L.push(svgToDataImg(svgs['mem-timeline'], 'Memory Timeline') + '\n');
+  }
+
+  if (svgs['waterfall']) {
     L.push('### Execution Timeline\n');
-    L.push(htmlWaterfall(wfRows) + '\n');
+    L.push(svgToDataImg(svgs['waterfall'], 'Execution Timeline') + '\n');
   }
 
   L.push('---');
@@ -286,15 +251,17 @@ function workflowMarkdownHtml(jobs: JobReport[]): string {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Build workflow-level markdown using HTML tables.
- * GitHub strips SVG features so we always render bgcolor-based
- * HTML tables that display reliably in Job Summary.
+ * Build workflow-level markdown using SVG data URI images.
+ * SVGs are base64-encoded and embedded as <img> tags for
+ * reliable rendering in GitHub Job Summary.
  */
 export function workflowMarkdown(
   jobs: JobReport[],
   _config?: MonitorConfig,
+  svgs?: Record<string, string>,
 ): string {
-  return workflowMarkdownHtml(jobs);
+  const resolvedSvgs = svgs ?? generateWorkflowSvgs(jobs);
+  return workflowMarkdownHtml(jobs, resolvedSvgs);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -316,14 +283,12 @@ export async function runSummary(config: MonitorConfig): Promise<void> {
 
   core.info(`RunnerLens: found ${jobs.length} job report(s): ${jobs.map((j) => j.jobName).join(', ')}`);
 
-  // Upload SVG charts (for external reference / artifacts)
+  // Generate SVG charts for both upload and embedding
   const svgs = generateWorkflowSvgs(jobs);
   if (config.githubToken && Object.keys(svgs).length > 0) {
     await uploadChartSvgs(svgs, config.githubToken);
   }
-  // Always use HTML tables for Job Summary — GitHub strips SVG
-  // features making <img> tags unreliable.
-  const md = workflowMarkdown(jobs, config);
+  const md = workflowMarkdown(jobs, config, svgs);
   await core.summary.addRaw(md).write();
   core.info('RunnerLens: workflow summary written to Job Summary');
 

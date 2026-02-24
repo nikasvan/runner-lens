@@ -12,13 +12,6 @@ async function run(): Promise<void> {
   try {
     const cfg = parseConfig();
 
-    // ── Summarize mode: skip collector, just enable post step ──
-    if (cfg.mode === 'summarize') {
-      core.saveState(STATE.ACTIVE, 'true');
-      core.info('RunnerLens: summarize mode — skipping collector');
-      return;
-    }
-
     // ── Prepare workspace ─────────────────────────────────
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(START_TS_FILE, Date.now().toString());

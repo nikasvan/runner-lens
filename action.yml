@@ -9,10 +9,6 @@ branding:
   color: 'blue'
 
 inputs:
-  mode:
-    description: 'Action mode: monitor (default) or summarize (workflow-level summary)'
-    required: false
-    default: 'monitor'
   sample-interval:
     description: 'Metric sampling interval in seconds (1–30)'
     required: false

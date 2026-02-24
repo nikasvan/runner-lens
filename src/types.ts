@@ -60,7 +60,6 @@ export interface SystemInfo {
 }
 
 export interface MonitorConfig {
-  mode: 'monitor' | 'summarize';
   sampleInterval: number;
   maxSizeMb: number;
   githubToken: string;
@@ -111,8 +110,4 @@ export interface AggregatedReport {
   reporter?: { cpu_pct: number; mem_mb: number };
 }
 
-export interface JobReport {
-  jobName: string;
-  report: AggregatedReport;
-}
 

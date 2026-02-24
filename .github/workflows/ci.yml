@@ -15,8 +15,6 @@ jobs:
     steps:
       # ── Dogfood: monitor this CI job ────────────────────────
       - uses: runnerlens/runner-lens@main
-        with:
-          summary-style: full
 
       - uses: actions/checkout@v4
 
@@ -48,7 +46,6 @@ jobs:
         id: lens
         with:
           sample-interval: '1'
-          summary-style: compact
           max-file-size: '50'
 
       - run: sleep 10

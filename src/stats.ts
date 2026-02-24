@@ -40,3 +40,10 @@ export function safeMax(values: number[], fallback = 0): number {
 export function safePct(numerator: number, denominator: number): number {
   return denominator > 0 ? (numerator / denominator) * 100 : 0;
 }
+
+export function fmtDuration(sec: number): string {
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}

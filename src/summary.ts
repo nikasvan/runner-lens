@@ -82,9 +82,8 @@ export function mergeReports(jobReports: JobReport[]): AggregatedReport {
     .slice(0, 10);
 
   // Load: weighted average for avg, max across all
-  const totalSamples = sorted.reduce((s, j) => s + j.report.sample_count, 0);
-  const loadAvg = totalSamples > 0
-    ? sorted.reduce((s, j) => s + j.report.load.avg_1m * j.report.sample_count, 0) / totalSamples
+  const loadAvg = sampleCount > 0
+    ? sorted.reduce((s, j) => s + j.report.load.avg_1m * j.report.sample_count, 0) / sampleCount
     : 0;
   const loadMax = safeMax(sorted.map((j) => j.report.load.max_1m));
 

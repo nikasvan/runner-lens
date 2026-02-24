@@ -8,7 +8,7 @@
 import * as https from 'https';
 import type { AggregatedReport, JobReport } from './types';
 import { REPORT_VERSION } from './constants';
-import { fmtDuration } from './svg-charts';
+import { fmtDuration } from './stats';
 
 // ── Palette ──────────────────────────────────────────────────
 

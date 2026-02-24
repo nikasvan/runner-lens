@@ -6,17 +6,11 @@ jest.mock('@actions/artifact', () => ({
   DefaultArtifactClient: jest.fn(),
 }));
 
-import { stats, safeMax, safePct } from '../src/stats';
+import { stats, safeMax, safePct, fmtDuration } from '../src/stats';
 import { processMetrics } from '../src/reporter';
-import { correlateSteps, fetchSteps } from '../src/steps';
-import {
-  renderStatCards, renderAreaChart, renderGanttChart,
-  sparkline, fmtDuration,
-  renderStatCardsFallback, renderGanttFallback,
-} from '../src/svg-charts';
+import { correlateSteps, fetchSteps, isLastJob } from '../src/steps';
 import { buildJobSummary } from '../src/job-summary';
 import { fingerprint, mergeReports } from '../src/summary';
-import { isLastJob } from '../src/steps';
 import type {
   MetricSample, SystemInfo, MonitorConfig, AggregatedReport, JobReport,
 } from '../src/types';
@@ -393,147 +387,8 @@ describe('edge cases', () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// svg-charts.ts
+// stats.ts — fmtDuration
 // ─────────────────────────────────────────────────────────────
-
-describe('renderStatCards (SVG)', () => {
-  it('produces valid SVG with 4 cards', () => {
-    const svg = renderStatCards([
-      { label: 'Runner', value: 'Linux', sub: '2 CPU', color: '#3fb950' },
-      { label: 'Duration', value: '5m 30s', color: '#58a6ff' },
-      { label: 'Avg CPU', value: '45.2%', sub: 'peak 92%', color: '#f0883e' },
-      { label: 'Memory', value: '3.0 GB', sub: 'of 7.0 GB', color: '#bc8cff' },
-    ]);
-    expect(svg).toContain('<svg');
-    expect(svg).toContain('Linux');
-    expect(svg).toContain('45.2%');
-    expect(svg).toContain('3.0 GB');
-  });
-});
-
-describe('renderAreaChart', () => {
-  it('produces valid SVG with curve and gradient', () => {
-    const svg = renderAreaChart({
-      title: 'CPU Usage', values: [10, 30, 50, 45, 60, 80, 70],
-      color: '#58a6ff', yLabel: 'CPU %',
-      startedAt: '2023-11-14T22:13:20Z', endedAt: '2023-11-14T22:20:00Z',
-      currentValue: '70%',
-    });
-    expect(svg).toContain('<svg');
-    expect(svg).toContain('CPU Usage');
-    expect(svg).toContain('linearGradient');
-  });
-
-  it('handles 2 data points', () => {
-    const svg = renderAreaChart({
-      title: 'CPU', values: [10, 90], color: '#58a6ff', yLabel: '%',
-      startedAt: '2023-01-01T00:00:00Z', endedAt: '2023-01-01T00:01:00Z',
-    });
-    expect(svg).toContain('<svg');
-  });
-
-  it('handles flat segments (delta=0) in monotone interpolation', () => {
-    const svg = renderAreaChart({
-      title: 'Flat', values: [50, 50, 50, 80, 80, 80, 30],
-      color: '#58a6ff', yLabel: '%',
-      startedAt: '2023-01-01T00:00:00Z', endedAt: '2023-01-01T00:01:00Z',
-    });
-    expect(svg).toContain('C');
-  });
-
-  it('handles steep changes triggering Fritsch-Carlson constraint', () => {
-    const svg = renderAreaChart({
-      title: 'Spike', values: [0, 10, 11, 100, 101, 102, 200],
-      color: '#58a6ff', yLabel: '%',
-      startedAt: '2023-01-01T00:00:00Z', endedAt: '2023-01-01T00:01:00Z',
-    });
-    expect(svg).toContain('C');
-  });
-
-  it('renders step separators', () => {
-    const svg = renderAreaChart({
-      title: 'CPU', values: [10, 20, 30, 40, 50],
-      color: '#58a6ff', yLabel: '%',
-      startedAt: '2023-11-14T22:13:20Z', endedAt: '2023-11-14T22:15:20Z',
-      steps: [{ name: 'Build', startedAt: '2023-11-14T22:14:00Z' }],
-    });
-    expect(svg).toContain('Build');
-    expect(svg).toContain('stroke-dasharray');
-  });
-
-  it('skips step separators at edges', () => {
-    const svg = renderAreaChart({
-      title: 'CPU', values: [10, 20, 30], color: '#58a6ff', yLabel: '%',
-      startedAt: '2023-11-14T22:13:20Z', endedAt: '2023-11-14T22:15:20Z',
-      steps: [{ name: 'Start', startedAt: '2023-11-14T22:13:20Z' }],
-    });
-    expect(svg).not.toContain('stroke-dasharray');
-  });
-});
-
-describe('renderGanttChart (SVG)', () => {
-  it('produces valid SVG with step bars', () => {
-    const svg = renderGanttChart({
-      steps: [
-        { name: 'Checkout', startedAt: '2023-11-14T22:13:20Z', completedAt: '2023-11-14T22:13:26Z', durationSec: 6, color: '#3fb950' },
-        { name: 'Build', startedAt: '2023-11-14T22:13:27Z', completedAt: '2023-11-14T22:14:27Z', durationSec: 60, color: '#58a6ff' },
-      ],
-      totalStartedAt: '2023-11-14T22:13:20Z',
-      totalEndedAt: '2023-11-14T22:15:00Z',
-    });
-    expect(svg).toContain('<svg');
-    expect(svg).toContain('Checkout');
-    expect(svg).toContain('Build');
-    expect(svg).toContain('Execution Timeline');
-  });
-});
-
-describe('fallback rendering', () => {
-  it('renderStatCardsFallback produces HTML table', () => {
-    const html = renderStatCardsFallback([
-      { label: 'Runner', value: 'Linux', sub: '2 CPU' },
-      { label: 'CPU', value: '45%' },
-    ]);
-    expect(html).toContain('<table>');
-    expect(html).toContain('Linux');
-  });
-
-  it('renderGanttFallback produces markdown table', () => {
-    const md = renderGanttFallback({
-      steps: [
-        { name: 'Build', startedAt: '2023-11-14T22:13:27Z', completedAt: '2023-11-14T22:14:27Z', durationSec: 60 },
-      ],
-      totalStartedAt: '2023-11-14T22:13:20Z',
-      totalEndedAt: '2023-11-14T22:15:00Z',
-    });
-    expect(md).toContain('Build');
-    expect(md).toContain('\u2588');
-    expect(md).toContain('| Step |');
-  });
-});
-
-describe('sparkline', () => {
-  it('maps values to Unicode block characters', () => {
-    const result = sparkline([0, 25, 50, 75, 100]);
-    expect(result).toHaveLength(5);
-    expect(result[0]).toBe('\u2581');
-    expect(result[4]).toBe('\u2588');
-  });
-
-  it('returns empty string for empty input', () => {
-    expect(sparkline([])).toBe('');
-  });
-
-  it('downsamples when values exceed width', () => {
-    const result = sparkline(Array.from({ length: 200 }, (_, i) => i), 50);
-    expect(result).toHaveLength(50);
-  });
-
-  it('handles flat data', () => {
-    const result = sparkline([50, 50, 50, 50, 50]);
-    expect(new Set(result.split('')).size).toBe(1);
-  });
-});
 
 describe('fmtDuration', () => {
   it('formats seconds', () => expect(fmtDuration(45)).toBe('45s'));

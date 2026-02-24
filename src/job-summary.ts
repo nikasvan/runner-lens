@@ -217,6 +217,9 @@ function timeLabels(startedAt: string, endedAt: string, count: number): string[]
 }
 
 const STEP_LINE_COLOR = '#d0d7de';
+const STEP_BAND_COLORS = ['rgba(0,0,0,0.04)', 'rgba(0,0,0,0)'];
+
+interface StepRegion { name: string; startX: number; endX: number }
 
 function buildChartConfig(
   title: string,
@@ -225,37 +228,60 @@ function buildChartConfig(
   lineColor: string,
   fillColor: string,
   yAxisLabel: string,
-  stepMarkers?: { name: string; xPos: number }[],
+  stepRegions?: StepRegion[],
 ): Record<string, any> {
   const annotations: Record<string, any> = {};
-  if (stepMarkers && stepMarkers.length > 0) {
+  let suggestedMax: number | undefined;
+
+  if (stepRegions && stepRegions.length > 0) {
     const dataMax = values.length > 0 ? Math.max(...values) : 100;
-    for (let i = 0; i < stepMarkers.length; i++) {
-      const m = stepMarkers[i];
-      const truncName = m.name.length > 20 ? m.name.slice(0, 17) + '...' : m.name;
-      // Vertical dashed line at step boundary
-      annotations[`sl${i}`] = {
-        type: 'line',
-        xMin: m.xPos,
-        xMax: m.xPos,
-        borderColor: STEP_LINE_COLOR,
-        borderWidth: 1,
-        borderDash: [4, 4],
-      };
-      // Step name label (separate annotation — proven to render on QuickChart)
+    suggestedMax = dataMax * 1.25;
+    const labelY = dataMax * 1.1;
+
+    for (let i = 0; i < stepRegions.length; i++) {
+      const m = stepRegions[i];
+      const truncName = m.name.length > 16 ? m.name.slice(0, 13) + '...' : m.name;
+      const bandWidth = m.endX - m.startX;
+
+      // Alternating background band
+      if (bandWidth >= 0.2) {
+        annotations[`sb${i}`] = {
+          type: 'box',
+          xMin: m.startX,
+          xMax: m.endX,
+          backgroundColor: STEP_BAND_COLORS[i % 2],
+          borderWidth: 0,
+          drawTime: 'beforeDatasetsDraw',
+        };
+      }
+
+      // Vertical line at step start (skip at x=0, it overlaps the y-axis)
+      if (m.startX > 0.2) {
+        annotations[`sl${i}`] = {
+          type: 'line',
+          xMin: m.startX,
+          xMax: m.startX,
+          borderColor: STEP_LINE_COLOR,
+          borderWidth: 1,
+          borderDash: [4, 4],
+        };
+      }
+
+      // Step name label centered in band
+      const midX = bandWidth >= 0.2 ? (m.startX + m.endX) / 2 : m.startX + 0.3;
       annotations[`sn${i}`] = {
         type: 'label',
-        xValue: m.xPos,
-        yValue: dataMax * 0.92,
+        xValue: midX,
+        yValue: labelY,
         content: [truncName],
         color: TICK,
-        font: { size: 9 },
+        font: { size: 8 },
         rotation: -90,
-        backgroundColor: 'rgba(255,255,255,0.85)',
-        padding: 3,
+        padding: 2,
       };
     }
   }
+
   const hasAnnotations = Object.keys(annotations).length > 0;
   return {
     type: 'line',
@@ -292,6 +318,7 @@ function buildChartConfig(
         },
         y: {
           beginAtZero: true,
+          ...(suggestedMax !== undefined ? { suggestedMax } : {}),
           ticks: { color: TICK, font: { size: 11 } },
           grid: { color: '#eff2f5' },
           border: { display: false },
@@ -321,36 +348,45 @@ async function buildQuickChart(
   fillColor: string,
   startedAt: string,
   endedAt: string,
-  steps?: { name: string; started_at: string }[],
+  steps?: { name: string; started_at: string; completed_at: string }[],
 ): Promise<string> {
   const maxPts = 30;
   const data = downsample(values, maxPts);
   const labels = timeLabels(startedAt, endedAt, data.length);
 
-  let stepMarkers: { name: string; xPos: number }[] | undefined;
+  let stepRegions: StepRegion[] | undefined;
   if (steps && steps.length > 0) {
     const startMs = new Date(startedAt).getTime();
     const endMs = new Date(endedAt).getTime();
     const range = endMs - startMs;
     if (range > 0) {
-      stepMarkers = steps
-        .filter(s => s.started_at)
-        .map(s => ({
-          name: s.name,
-          xPos: ((new Date(s.started_at).getTime() - startMs) / range) * (data.length - 1),
-        }))
-        .filter(m => m.xPos >= 0 && m.xPos <= data.length - 1);
+      const maxIdx = data.length - 1;
+      stepRegions = steps
+        .filter(s => s.started_at && s.completed_at)
+        .map(s => {
+          const sMs = new Date(s.started_at).getTime();
+          const eMs = new Date(s.completed_at).getTime();
+          return {
+            name: s.name,
+            startX: Math.max(0, Math.min(maxIdx, ((sMs - startMs) / range) * maxIdx)),
+            endX: Math.max(0, Math.min(maxIdx, ((eMs - startMs) / range) * maxIdx)),
+          };
+        })
+        // Keep steps that overlap the chart range (band has width, or point within range)
+        .filter(m => m.endX > m.startX + 0.1 || (m.startX > 0 && m.startX < maxIdx));
     }
   }
 
-  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel, stepMarkers);
+  const hasSteps = stepRegions && stepRegions.length > 0;
+  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel, stepRegions);
+  const chartHeight = hasSteps ? 300 : 250;
   let url = buildChartUrl(config);
   if (url.length > QUICKCHART_URL_LIMIT) {
     const body = JSON.stringify({
       version: CHART_VERSION,
       backgroundColor: CHART_BG,
       width: 760,
-      height: 250,
+      height: chartHeight,
       devicePixelRatio: 2,
       format: 'png',
       chart: config,

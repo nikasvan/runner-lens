@@ -29,6 +29,10 @@ inputs:
     description: 'Upload metrics report as a workflow artifact (true/false)'
     required: false
     default: 'true'
+  write-summary:
+    description: 'Write job summary for this job (set to false when using a summarize job)'
+    required: false
+    default: 'true'
 
 outputs:
   cpu-avg:

@@ -169,11 +169,13 @@ async function run(): Promise<void> {
     core.setOutput('report-json', JSON.stringify(report));
 
     // ── Job Summary (best-effort) ───────────────────────
-    try {
-      const summaryHtml = await buildJobSummary(report);
-      await core.summary.addRaw(summaryHtml).write();
-    } catch (e) {
-      core.debug(`RunnerLens: job summary failed — ${e}`);
+    if (core.getInput('write-summary').toLowerCase() !== 'false') {
+      try {
+        const summaryHtml = await buildJobSummary(report);
+        await core.summary.addRaw(summaryHtml).write();
+      } catch (e) {
+        core.debug(`RunnerLens: job summary failed — ${e}`);
+      }
     }
 
     // ── Upload report artifact (opt-in) ────────────────

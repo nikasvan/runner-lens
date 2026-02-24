@@ -216,6 +216,8 @@ function timeLabels(startedAt: string, endedAt: string, count: number): string[]
   return labels;
 }
 
+const STEP_LINE_COLOR = '#d0d7de';
+
 function buildChartConfig(
   title: string,
   values: number[],
@@ -223,7 +225,34 @@ function buildChartConfig(
   lineColor: string,
   fillColor: string,
   yAxisLabel: string,
+  stepMarkers?: { name: string; xPos: number }[],
 ): Record<string, any> {
+  const annotations: Record<string, any> = {};
+  if (stepMarkers && stepMarkers.length > 0) {
+    for (let i = 0; i < stepMarkers.length; i++) {
+      const m = stepMarkers[i];
+      const truncName = m.name.length > 20 ? m.name.slice(0, 17) + '...' : m.name;
+      annotations[`step${i}`] = {
+        type: 'line',
+        xMin: m.xPos,
+        xMax: m.xPos,
+        borderColor: STEP_LINE_COLOR,
+        borderWidth: 1,
+        borderDash: [4, 4],
+        label: {
+          display: true,
+          content: truncName,
+          position: 'start',
+          rotation: -90,
+          backgroundColor: 'rgba(255,255,255,0.85)',
+          color: TICK,
+          font: { size: 9 },
+          padding: 3,
+        },
+      };
+    }
+  }
+  const hasAnnotations = Object.keys(annotations).length > 0;
   return {
     type: 'line',
     data: {
@@ -249,6 +278,7 @@ function buildChartConfig(
           font: { size: 14, weight: 'bold' },
           padding: { bottom: 12 },
         },
+        ...(hasAnnotations ? { annotation: { annotations } } : {}),
       },
       scales: {
         x: {
@@ -287,12 +317,29 @@ async function buildQuickChart(
   fillColor: string,
   startedAt: string,
   endedAt: string,
+  steps?: { name: string; started_at: string }[],
 ): Promise<string> {
   const maxPts = 30;
   const data = downsample(values, maxPts);
   const labels = timeLabels(startedAt, endedAt, data.length);
 
-  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel);
+  let stepMarkers: { name: string; xPos: number }[] | undefined;
+  if (steps && steps.length > 0) {
+    const startMs = new Date(startedAt).getTime();
+    const endMs = new Date(endedAt).getTime();
+    const range = endMs - startMs;
+    if (range > 0) {
+      stepMarkers = steps
+        .filter(s => s.started_at)
+        .map(s => ({
+          name: s.name,
+          xPos: ((new Date(s.started_at).getTime() - startMs) / range) * (data.length - 1),
+        }))
+        .filter(m => m.xPos >= 0 && m.xPos <= data.length - 1);
+    }
+  }
+
+  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel, stepMarkers);
   let url = buildChartUrl(config);
   if (url.length > QUICKCHART_URL_LIMIT) {
     const body = JSON.stringify({
@@ -455,11 +502,13 @@ async function buildJobSection(report: AggregatedReport): Promise<string> {
         'CPU Usage (%)', timeline.cpu_pct, 'CPU %',
         CPU_COLOR, CPU_FILL,
         report.started_at, report.ended_at,
+        report.steps,
       ));
       parts.push(await buildQuickChart(
         'Memory Usage (MB)', timeline.mem_mb, 'MB',
         MEM_COLOR, MEM_FILL,
         report.started_at, report.ended_at,
+        report.steps,
       ));
     } catch {
       // Best-effort: skip charts on failure

@@ -561,7 +561,7 @@ describe('buildJobSummary', () => {
     expect(html).toContain('Memory Usage');
   });
 
-  it('includes Mermaid Gantt with theme init and section when steps are present', async () => {
+  it('includes Gantt chart image when steps are present', async () => {
     const html = await buildJobSummary(makeReport({
       steps: [
         { name: 'Checkout', number: 1, duration_seconds: 6, cpu_avg: 20, cpu_max: 40, mem_avg_mb: 1024, mem_max_mb: 2048, sample_count: 2, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' },
@@ -572,17 +572,11 @@ describe('buildJobSummary', () => {
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }));
-    expect(html).toContain('```mermaid');
-    expect(html).toContain("%%{init:");
-    expect(html).toContain("'theme': 'base'");
-    expect(html).toContain('gantt');
+    expect(html).toContain('<img');
     expect(html).toContain('Execution Timeline');
-    expect(html).toContain('section');
-    expect(html).toContain('Checkout');
-    expect(html).toContain('Build');
   });
 
-  it('groups Gantt by jobs with different colored bars per job', async () => {
+  it('renders multi-job Gantt with per-job colored bars', async () => {
     const baseReport = makeReport();
     const jobs = [
       {
@@ -599,32 +593,15 @@ describe('buildJobSummary', () => {
         report: makeReport({
           steps: [
             { name: 'Run tests', number: 1, duration_seconds: 120, cpu_avg: 50, cpu_max: 80, mem_avg_mb: 2048, mem_max_mb: 3072, sample_count: 40, started_at: '2023-11-14T22:14:30Z', completed_at: '2023-11-14T22:16:30Z' },
-            { name: 'Upload coverage', number: 2, duration_seconds: 10, cpu_avg: 10, cpu_max: 20, mem_avg_mb: 512, mem_max_mb: 768, sample_count: 3, started_at: '2023-11-14T22:16:31Z', completed_at: '2023-11-14T22:16:41Z' },
-          ],
-        }),
-      },
-      {
-        jobName: 'deploy',
-        report: makeReport({
-          steps: [
-            { name: 'Deploy to staging', number: 1, duration_seconds: 30, cpu_avg: 35, cpu_max: 60, mem_avg_mb: 1500, mem_max_mb: 2200, sample_count: 10, started_at: '2023-11-14T22:16:45Z', completed_at: '2023-11-14T22:17:15Z' },
           ],
         }),
       },
     ];
     const html = await buildJobSummary(baseReport, jobs);
-    // Sections for each job
-    expect(html).toContain('section build');
-    expect(html).toContain('section test');
-    expect(html).toContain('section deploy');
-    // Job 0 (build) = default (no tag), Job 1 (test) = active, Job 2 (deploy) = crit
-    expect(html).toMatch(/Checkout\s*:\d/);            // default: no tag before timestamp
-    expect(html).toMatch(/Run tests\s*:active,\s*\d/); // active tag for green bars
-    expect(html).toMatch(/Deploy to staging\s*:crit,\s*\d/); // crit tag for orange bars
-    // Theme customization present
-    expect(html).toContain("'taskBkgColor': '#2f81f7'");
-    expect(html).toContain("'activeTaskBkgColor': '#3fb950'");
-    expect(html).toContain("'critBkgColor': '#f0883e'");
+    // Rendered as QuickChart image, not Mermaid
+    expect(html).toContain('<img');
+    expect(html).toContain('Execution Timeline');
+    expect(html).not.toContain('```mermaid');
   });
 
   it('skips line charts when no timeline data', async () => {

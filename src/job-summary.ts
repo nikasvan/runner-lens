@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────
 // RunnerLens — Job Summary Builder
 //
-// Uses QuickChart.io for all visuals (stat cards + charts),
-// Mermaid for Gantt timeline.
+// Uses QuickChart.io for all visuals: stat cards, CPU/Memory
+// line charts, and Gantt execution timeline.
 // ─────────────────────────────────────────────────────────────
 
 import * as https from 'https';
@@ -133,6 +133,7 @@ async function buildStatCardsImage(report: AggregatedReport): Promise<string> {
     backgroundColor: CHART_BG,
     width: 760,
     height: 100,
+    devicePixelRatio: 2,
     format: 'png',
     chart: config,
   });
@@ -250,7 +251,7 @@ function buildChartUrl(config: Record<string, any>): string {
   const json = JSON.stringify(config);
   const encoded = encodeURIComponent(json);
   const bkg = encodeURIComponent(CHART_BG);
-  return `https://quickchart.io/chart?v=${CHART_VERSION}&c=${encoded}&w=760&h=250&bkg=${bkg}&f=png`;
+  return `https://quickchart.io/chart?v=${CHART_VERSION}&c=${encoded}&w=760&h=250&bkg=${bkg}&f=png&devicePixelRatio=2`;
 }
 
 async function buildQuickChart(
@@ -274,6 +275,7 @@ async function buildQuickChart(
       backgroundColor: CHART_BG,
       width: 760,
       height: 250,
+      devicePixelRatio: 2,
       format: 'png',
       chart: config,
     });
@@ -287,85 +289,153 @@ async function buildQuickChart(
   return `<img src="${url}" alt="${esc(title)}" width="760">`;
 }
 
-// ── Mermaid Gantt Timeline ───────────────────────────────────
+// ── Gantt Timeline (QuickChart.io horizontal bar chart) ──────
 
 interface GanttJob {
   jobName: string;
   steps: { name: string; started_at: string; completed_at: string }[];
 }
 
-// Mermaid task tags — each maps to a different theme color set.
-// default=blue, active=green, crit=orange, done=purple
-const GANTT_TASK_TAGS = ['', 'active, ', 'crit, ', 'done, '];
+const GANTT_COLORS = [
+  { bg: '#2f81f7', border: '#1a6dd8' },
+  { bg: '#3fb950', border: '#2ea043' },
+  { bg: '#f0883e', border: '#d68028' },
+  { bg: '#bc8cff', border: '#9860e4' },
+  { bg: '#f85149', border: '#da3633' },
+  { bg: '#79c0ff', border: '#58a6ff' },
+];
 
-function buildGanttThemeInit(): string {
-  const vars = [
-    "'primaryColor': '#2f81f7'",
-    "'primaryTextColor': '#fff'",
-    "'primaryBorderColor': '#1a6dd8'",
-    // default bars (blue)
-    "'taskBkgColor': '#2f81f7'",
-    "'taskBorderColor': '#1a6dd8'",
-    "'taskTextColor': '#fff'",
-    "'taskTextLightColor': '#fff'",
-    // active bars (green)
-    "'activeTaskBkgColor': '#3fb950'",
-    "'activeTaskBorderColor': '#2ea043'",
-    // crit bars (orange)
-    "'critBkgColor': '#f0883e'",
-    "'critBorderColor': '#d68028'",
-    // done bars (purple)
-    "'doneTaskBkgColor': '#bc8cff'",
-    "'doneTaskBorderColor': '#9860e4'",
-    // section backgrounds — alternating subtle tints
-    "'sectionBkgColor': '#f0f6ff'",
-    "'sectionBkgColor2': '#f0fff4'",
-    "'altSectionBkgColor': '#f0f6ff'",
-    // grid
-    "'gridColor': '#d0d7de'",
-    "'todayLineColor': 'transparent'",
-  ];
-  return `%%{init: {'theme': 'base', 'themeVariables': {${vars.join(', ')}}}}%%`;
-}
-
-function buildMermaidGantt(report: AggregatedReport, jobs?: JobReport[]): string {
-  const lines: string[] = [
-    '```mermaid',
-    buildGanttThemeInit(),
-    'gantt',
-    '  title Execution Timeline',
-    '  dateFormat x',
-    '  axisFormat %H:%M:%S',
-  ];
-
-  // Build list of jobs with their steps
+function collectGanttJobs(report: AggregatedReport, jobs?: JobReport[]): GanttJob[] {
   const ganttJobs: GanttJob[] = [];
-
   if (jobs && jobs.length > 0) {
-    // Multi-job: each JobReport becomes a section with distinct bar color
     for (const job of jobs) {
       if (job.report.steps && job.report.steps.length > 0) {
         ganttJobs.push({ jobName: job.jobName, steps: job.report.steps });
       }
     }
   } else if (report.steps && report.steps.length > 0) {
-    // Single-job: use the runner name or a default
-    const jobName = process.env.GITHUB_JOB || 'Job';
-    ganttJobs.push({ jobName, steps: report.steps });
+    ganttJobs.push({ jobName: process.env.GITHUB_JOB || 'Job', steps: report.steps });
+  }
+  return ganttJobs;
+}
+
+function buildGanttChartString(ganttJobs: GanttJob[]): string {
+  // Build rows: steps + separator rows between job groups
+  const rows: { label: string; startMs: number; endMs: number; durStr: string; color: string; border: string; isSep: boolean }[] = [];
+  const groups: { startRow: number; endRow: number; ji: number }[] = [];
+
+  for (let ji = 0; ji < ganttJobs.length; ji++) {
+    const c = GANTT_COLORS[ji % GANTT_COLORS.length];
+    if (ji > 0) {
+      rows.push({ label: '', startMs: 0, endMs: 0, durStr: '', color: 'transparent', border: 'transparent', isSep: true });
+    }
+    const startRow = rows.length;
+    for (let si = 0; si < ganttJobs[ji].steps.length; si++) {
+      const step = ganttJobs[ji].steps[si];
+      let name = step.name.length > 24 ? step.name.slice(0, 22) + '..' : step.name;
+      if (si === 0 && ganttJobs.length > 1) {
+        const jn = ganttJobs[ji].jobName;
+        name = jn + ' \u203a ' + name;
+        if (name.length > 30) name = name.slice(0, 28) + '..';
+      }
+      const sMs = new Date(step.started_at).getTime();
+      const eMs = new Date(step.completed_at).getTime();
+      rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, border: c.border, isSep: false });
+    }
+    groups.push({ startRow, endRow: rows.length - 1, ji });
   }
 
-  ganttJobs.forEach((job, jobIndex) => {
-    const sectionName = job.jobName.replace(/[:;]/g, '-');
-    const tag = GANTT_TASK_TAGS[jobIndex % GANTT_TASK_TAGS.length];
-    lines.push(`  section ${sectionName}`);
-    for (const step of job.steps) {
-      const startMs = new Date(step.started_at).getTime();
-      const endMs = new Date(step.completed_at).getTime();
-      const name = step.name.replace(/[:;]/g, '-');
-      lines.push(`  ${name} :${tag}${startMs}, ${endMs}`);
+  const dataRows = rows.filter((r) => !r.isSep);
+  const globalMin = Math.min(...dataRows.map((r) => r.startMs));
+  const globalMax = Math.max(...dataRows.map((r) => r.endMs));
+  const range = globalMax - globalMin || 1;
+  const xPad = range * 0.1;
+
+  const labels = JSON.stringify(rows.map((r) => r.label));
+  const data = rows.map((r) => (r.isSep ? 'null' : `[${r.startMs},${r.endMs}]`)).join(',');
+  const bgColors = JSON.stringify(rows.map((r) => r.color));
+  const borderColors = JSON.stringify(rows.map((r) => r.border));
+
+  // Annotations: group backgrounds, gray tracks, duration labels
+  const anns: string[] = [];
+
+  // Job group tinted backgrounds
+  for (const g of groups) {
+    const c = GANTT_COLORS[g.ji % GANTT_COLORS.length];
+    anns.push(`grp${g.ji}:{type:'box',drawTime:'beforeDatasetsDraw',yMin:${g.startRow - 0.5},yMax:${g.endRow + 0.5},backgroundColor:'${c.bg}10',borderColor:'${c.bg}30',borderWidth:1,borderRadius:6}`);
+  }
+
+  // Gray track behind each bar + duration label on right
+  for (let i = 0; i < rows.length; i++) {
+    if (!rows[i].isSep) {
+      anns.push(`tr${i}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin},xMax:${globalMax},yMin:${i + 0.1},yMax:${i + 0.9},backgroundColor:'#f0f3f6',borderColor:'#e1e4e8',borderWidth:1,borderRadius:4}`);
+      anns.push(`du${i}:{type:'label',drawTime:'afterDatasetsDraw',xValue:${globalMax + xPad * 0.55},yValue:${i},content:['${rows[i].durStr}'],color:'${TICK}',font:{size:10}}`);
     }
+  }
+
+  /* eslint-disable no-useless-escape */
+  return `{
+type:'bar',
+data:{labels:${labels},datasets:[{data:[${data}],backgroundColor:${bgColors},borderColor:${borderColors},borderWidth:1,borderRadius:4,borderSkipped:false,barPercentage:0.78,categoryPercentage:1.0}]},
+options:{
+  indexAxis:'y',
+  plugins:{
+    legend:{display:false},
+    title:{display:true,text:'Execution Timeline',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:8}},
+    annotation:{annotations:{${anns.join(',')}}}
+  },
+  scales:{
+    x:{
+      type:'linear',min:${globalMin},max:${globalMax + xPad},
+      ticks:{color:'${TICK}',font:{size:10},maxRotation:0,
+        callback:function(val){if(val>${globalMax})return '';var d=new Date(val);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+':'+d.getUTCSeconds().toString().padStart(2,'0')}
+      },
+      grid:{color:'${GRID}'}
+    },
+    y:{ticks:{color:'${TITLE_COLOR}',font:{size:11}},grid:{display:false}}
+  },
+  layout:{padding:{right:8,left:4,top:4,bottom:4}}
+}}`;
+  /* eslint-enable no-useless-escape */
+}
+
+async function buildGanttChart(ganttJobs: GanttJob[]): Promise<string> {
+  const totalSteps = ganttJobs.reduce((n, j) => n + j.steps.length, 0);
+  const separators = Math.max(0, ganttJobs.length - 1);
+  const height = Math.max(180, Math.min(700, 70 + totalSteps * 34 + separators * 18));
+  const chartStr = buildGanttChartString(ganttJobs);
+
+  const body = JSON.stringify({
+    version: CHART_VERSION,
+    backgroundColor: CHART_BG,
+    width: 760,
+    height,
+    devicePixelRatio: 2,
+    format: 'png',
+    chart: chartStr,
   });
 
+  const url = await postQuickChart(body);
+  return `<img src="${url}" alt="Execution Timeline" width="760">`;
+}
+
+/** Mermaid fallback if QuickChart fails */
+function buildGanttFallback(ganttJobs: GanttJob[]): string {
+  const lines: string[] = [
+    '```mermaid',
+    'gantt',
+    '  title Execution Timeline',
+    '  dateFormat x',
+    '  axisFormat %H:%M:%S',
+  ];
+  for (const job of ganttJobs) {
+    lines.push(`  section ${job.jobName.replace(/[:;]/g, '-')}`);
+    for (const step of job.steps) {
+      const s = new Date(step.started_at).getTime();
+      const e = new Date(step.completed_at).getTime();
+      lines.push(`  ${step.name.replace(/[:;]/g, '-')} : ${s}, ${e}`);
+    }
+  }
   lines.push('```');
   return lines.join('\n');
 }
@@ -412,11 +482,14 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
     }
   }
 
-  // Gantt timeline — grouped by jobs with sections for color differentiation
-  const hasMultiJobSteps = jobs && jobs.some((j) => j.report.steps && j.report.steps.length > 0);
-  const hasSingleJobSteps = report.steps && report.steps.length > 0;
-  if (hasMultiJobSteps || hasSingleJobSteps) {
-    parts.push(buildMermaidGantt(report, jobs));
+  // Gantt timeline — QuickChart.io horizontal bar chart with per-job colors
+  const ganttJobs = collectGanttJobs(report, jobs);
+  if (ganttJobs.length > 0) {
+    try {
+      parts.push(await buildGanttChart(ganttJobs));
+    } catch {
+      parts.push(buildGanttFallback(ganttJobs));
+    }
   }
 
   parts.push(

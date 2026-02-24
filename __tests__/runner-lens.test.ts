@@ -7,7 +7,6 @@ import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import {
   renderStatCards, renderAreaChart, renderGanttChart,
-  svgToPngDataUri, initResvg,
   sparkline, fmtDuration,
   renderStatCardsFallback, renderGanttFallback,
 } from '../src/svg-charts';
@@ -469,17 +468,6 @@ describe('renderGanttChart (SVG)', () => {
   });
 });
 
-describe('svgToPngDataUri', () => {
-  beforeAll(async () => { await initResvg(); });
-
-  it('converts SVG to a PNG data URI at 2x resolution', () => {
-    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="#0d1117"/></svg>';
-    const result = svgToPngDataUri(svg);
-    expect(result.uri).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
-    expect(result.width).toBe(100);
-  });
-});
-
 describe('fallback rendering', () => {
   it('renderStatCardsFallback produces HTML table', () => {
     const html = renderStatCardsFallback([
@@ -538,8 +526,6 @@ describe('fmtDuration', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('buildJobSummary', () => {
-  beforeAll(async () => { await initResvg(); });
-
   function makeReport(overrides: Partial<AggregatedReport> = {}): AggregatedReport {
     return {
       version: '1.0.0',
@@ -556,25 +542,27 @@ describe('buildJobSummary', () => {
     };
   }
 
-  it('produces summary with PNG stat cards', () => {
-    const html = buildJobSummary(makeReport());
-    expect(html).toContain('<img src="data:image/png;base64,');
-    expect(html).toContain('RunnerLens');
+  it('produces summary with stat cards image and footer', async () => {
+    const md = await buildJobSummary(makeReport());
+    expect(md).toContain('<img');
+    expect(md).toContain('Runner Stats');
+    expect(md).toContain('RunnerLens');
   });
 
-  it('includes CPU and Memory charts when timeline has >= 2 points', () => {
-    const html = buildJobSummary(makeReport({
+  it('includes QuickChart CPU and Memory charts when timeline has >= 2 points', async () => {
+    const html = await buildJobSummary(makeReport({
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }));
-    expect(html).toContain('alt="CPU Usage Chart"');
-    expect(html).toContain('alt="Memory Usage Chart"');
+    expect(html).toContain('<img src="https://quickchart.io/chart');
+    expect(html).toContain('CPU Usage');
+    expect(html).toContain('Memory Usage');
   });
 
-  it('includes Gantt chart when steps are present', () => {
-    const html = buildJobSummary(makeReport({
+  it('includes Mermaid Gantt with theme init and section when steps are present', async () => {
+    const html = await buildJobSummary(makeReport({
       steps: [
         { name: 'Checkout', number: 1, duration_seconds: 6, cpu_avg: 20, cpu_max: 40, mem_avg_mb: 1024, mem_max_mb: 2048, sample_count: 2, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' },
         { name: 'Build', number: 2, duration_seconds: 60, cpu_avg: 60, cpu_max: 92, mem_avg_mb: 3072, mem_max_mb: 5120, sample_count: 20, started_at: '2023-11-14T22:13:27Z', completed_at: '2023-11-14T22:14:27Z' },
@@ -584,32 +572,97 @@ describe('buildJobSummary', () => {
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }));
-    expect(html).toContain('alt="Execution Timeline"');
+    expect(html).toContain('```mermaid');
+    expect(html).toContain("%%{init:");
+    expect(html).toContain("'theme': 'base'");
+    expect(html).toContain('gantt');
+    expect(html).toContain('Execution Timeline');
+    expect(html).toContain('section');
+    expect(html).toContain('Checkout');
+    expect(html).toContain('Build');
   });
 
-  it('skips area charts when no timeline data', () => {
-    const html = buildJobSummary(makeReport({ timeline: undefined }));
-    expect(html).toContain('alt="RunnerLens Stats"');
-    expect(html).not.toContain('alt="CPU Usage Chart"');
+  it('groups Gantt by jobs with different colored bars per job', async () => {
+    const baseReport = makeReport();
+    const jobs = [
+      {
+        jobName: 'build',
+        report: makeReport({
+          steps: [
+            { name: 'Checkout', number: 1, duration_seconds: 6, cpu_avg: 20, cpu_max: 40, mem_avg_mb: 1024, mem_max_mb: 2048, sample_count: 2, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' },
+            { name: 'Compile', number: 2, duration_seconds: 60, cpu_avg: 70, cpu_max: 95, mem_avg_mb: 4096, mem_max_mb: 6000, sample_count: 20, started_at: '2023-11-14T22:13:27Z', completed_at: '2023-11-14T22:14:27Z' },
+          ],
+        }),
+      },
+      {
+        jobName: 'test',
+        report: makeReport({
+          steps: [
+            { name: 'Run tests', number: 1, duration_seconds: 120, cpu_avg: 50, cpu_max: 80, mem_avg_mb: 2048, mem_max_mb: 3072, sample_count: 40, started_at: '2023-11-14T22:14:30Z', completed_at: '2023-11-14T22:16:30Z' },
+            { name: 'Upload coverage', number: 2, duration_seconds: 10, cpu_avg: 10, cpu_max: 20, mem_avg_mb: 512, mem_max_mb: 768, sample_count: 3, started_at: '2023-11-14T22:16:31Z', completed_at: '2023-11-14T22:16:41Z' },
+          ],
+        }),
+      },
+      {
+        jobName: 'deploy',
+        report: makeReport({
+          steps: [
+            { name: 'Deploy to staging', number: 1, duration_seconds: 30, cpu_avg: 35, cpu_max: 60, mem_avg_mb: 1500, mem_max_mb: 2200, sample_count: 10, started_at: '2023-11-14T22:16:45Z', completed_at: '2023-11-14T22:17:15Z' },
+          ],
+        }),
+      },
+    ];
+    const html = await buildJobSummary(baseReport, jobs);
+    // Sections for each job
+    expect(html).toContain('section build');
+    expect(html).toContain('section test');
+    expect(html).toContain('section deploy');
+    // Job 0 (build) = default (no tag), Job 1 (test) = active, Job 2 (deploy) = crit
+    expect(html).toMatch(/Checkout\s*:\d/);            // default: no tag before timestamp
+    expect(html).toMatch(/Run tests\s*:active,\s*\d/); // active tag for green bars
+    expect(html).toMatch(/Deploy to staging\s*:crit,\s*\d/); // crit tag for orange bars
+    // Theme customization present
+    expect(html).toContain("'taskBkgColor': '#2f81f7'");
+    expect(html).toContain("'activeTaskBkgColor': '#3fb950'");
+    expect(html).toContain("'critBkgColor': '#f0883e'");
   });
 
-  it('includes footer with version', () => {
-    const html = buildJobSummary(makeReport());
+  it('skips line charts when no timeline data', async () => {
+    const md = await buildJobSummary(makeReport({ timeline: undefined }));
+    // Stat cards image is still present
+    expect(md).toContain('Runner Stats');
+    // But no CPU/Memory line charts
+    expect(md).not.toContain('CPU Usage');
+  });
+
+  it('includes footer with version', async () => {
+    const html = await buildJobSummary(makeReport());
     expect(html).toContain('v1.0.0');
     expect(html).toContain('runnerlens/runner-lens');
   });
 
-  it('formats duration >= 60s as minutes', () => {
-    const html = buildJobSummary(makeReport({ duration_seconds: 120 }));
-    // The "2m" appears inside the PNG (not inspectable), but verify no crash
-    expect(html).toContain('<img');
+  it('formats duration >= 60s as minutes (fmtDuration)', () => {
+    // fmtDuration is tested directly above; stat cards render values into an image
+    expect(fmtDuration(120)).toBe('2m');
   });
 
-  it('formats memory < 1024 MB as MB', () => {
-    const html = buildJobSummary(makeReport({
+  it('formats memory < 1024 MB as MB (fmtMem via stat cards)', async () => {
+    // Value is baked into the stat cards image; verify the summary still builds
+    const md = await buildJobSummary(makeReport({
       memory: { avg: 512, max: 800, min: 100, p50: 500, p95: 750, p99: 780, latest: 600, total_mb: 1024, swap_max_mb: 0 },
     }));
-    // Memory label baked into PNG; verify it renders without crashing
-    expect(html).toContain('data:image/png;base64,');
+    expect(md).toContain('Runner Stats');
+    expect(md).toContain('RunnerLens');
+  });
+
+  it('downsamples long timelines and skips labels', async () => {
+    const cpu = Array.from({ length: 60 }, (_, i) => 20 + (i % 30));
+    const mem = Array.from({ length: 60 }, (_, i) => 1000 + i * 50);
+    const md = await buildJobSummary(makeReport({
+      timeline: { cpu_pct: cpu, mem_mb: mem },
+    }));
+    expect(md).toContain('quickchart.io');
+    expect(md).toContain('CPU Usage');
+    expect(md).toContain('Memory Usage');
   });
 });

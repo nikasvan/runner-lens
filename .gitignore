@@ -1,9 +1,4 @@
 node_modules
-# Allow the WASM dep bundled with the post action
-!dist/post/node_modules
-!dist/post/node_modules/@resvg
-!dist/post/node_modules/@resvg/resvg-wasm
-!dist/post/node_modules/@resvg/resvg-wasm/**
 coverage
 
 # sourcemaps (large debug artifacts, not needed at runtime)

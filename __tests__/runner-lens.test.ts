@@ -2,6 +2,10 @@
 // RunnerLens — Test Suite
 // ─────────────────────────────────────────────────────────────
 
+jest.mock('@actions/artifact', () => ({
+  DefaultArtifactClient: jest.fn(),
+}));
+
 import { stats, safeMax, safePct } from '../src/stats';
 import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
@@ -11,8 +15,9 @@ import {
   renderStatCardsFallback, renderGanttFallback,
 } from '../src/svg-charts';
 import { buildJobSummary } from '../src/job-summary';
+import { fingerprint, mergeReports } from '../src/summary';
 import type {
-  MetricSample, SystemInfo, MonitorConfig, AggregatedReport,
+  MetricSample, SystemInfo, MonitorConfig, AggregatedReport, JobReport,
 } from '../src/types';
 
 // ─────────────────────────────────────────────────────────────
@@ -641,5 +646,224 @@ describe('buildJobSummary', () => {
     expect(md).toContain('quickchart.io');
     expect(md).toContain('CPU Usage');
     expect(md).toContain('Memory Usage');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// summary.ts — fingerprint & mergeReports
+// ─────────────────────────────────────────────────────────────
+
+describe('fingerprint', () => {
+  it('produces identical fingerprints for same hardware', () => {
+    const sys1 = makeSysInfo();
+    const sys2 = makeSysInfo();
+    expect(fingerprint(sys1)).toBe(fingerprint(sys2));
+  });
+
+  it('produces different fingerprints for different hardware', () => {
+    const sys1 = makeSysInfo();
+    const sys2 = { ...makeSysInfo(), cpu_count: 4, total_memory_mb: 16384 };
+    expect(fingerprint(sys1)).not.toBe(fingerprint(sys2));
+  });
+
+  it('differentiates by OS', () => {
+    const linux = makeSysInfo();
+    const windows = { ...makeSysInfo(), runner_os: 'Windows' };
+    expect(fingerprint(linux)).not.toBe(fingerprint(windows));
+  });
+
+  it('differentiates by arch', () => {
+    const x64 = makeSysInfo();
+    const arm = { ...makeSysInfo(), runner_arch: 'ARM64' };
+    expect(fingerprint(x64)).not.toBe(fingerprint(arm));
+  });
+});
+
+describe('mergeReports', () => {
+  function makeJobReport(
+    jobName: string,
+    overrides: Partial<AggregatedReport> = {},
+  ): JobReport {
+    return {
+      jobName,
+      report: {
+        version: '1.0.0',
+        system: makeSysInfo(),
+        duration_seconds: 120,
+        sample_count: 40,
+        started_at: '2023-11-14T22:13:20Z',
+        ended_at: '2023-11-14T22:15:20Z',
+        cpu: { avg: 45, max: 92, min: 5, p50: 42, p95: 85, p99: 90, latest: 70 },
+        memory: { avg: 3072, max: 5120, min: 1024, p50: 3000, p95: 4800, p99: 5000, latest: 3500, total_mb: 7168, swap_max_mb: 0 },
+        load: { avg_1m: 1.5, max_1m: 3.2 },
+        top_processes: [
+          { pid: 100, name: 'node', cpu_pct: 35, mem_mb: 256 },
+        ],
+        ...overrides,
+      },
+    };
+  }
+
+  it('merges two job reports into one', () => {
+    const job1 = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:15:20Z',
+      sample_count: 40,
+    });
+    const job2 = makeJobReport('test', {
+      started_at: '2023-11-14T22:15:30Z',
+      ended_at: '2023-11-14T22:18:30Z',
+      sample_count: 60,
+    });
+
+    const merged = mergeReports([job1, job2]);
+    expect(merged.sample_count).toBe(100);
+    expect(merged.started_at).toBe('2023-11-14T22:13:20Z');
+    expect(merged.ended_at).toBe('2023-11-14T22:18:30.000Z');
+  });
+
+  it('concatenates timelines in chronological order', () => {
+    const job1 = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:15:20Z',
+      timeline: { cpu_pct: [10, 20, 30], mem_mb: [1000, 2000, 3000] },
+    });
+    const job2 = makeJobReport('test', {
+      started_at: '2023-11-14T22:15:30Z',
+      ended_at: '2023-11-14T22:18:30Z',
+      timeline: { cpu_pct: [40, 50], mem_mb: [4000, 5000] },
+    });
+
+    const merged = mergeReports([job1, job2]);
+    expect(merged.timeline).toBeDefined();
+    expect(merged.timeline!.cpu_pct).toEqual([10, 20, 30, 40, 50]);
+    expect(merged.timeline!.mem_mb).toEqual([1000, 2000, 3000, 4000, 5000]);
+  });
+
+  it('recomputes CPU stats from merged timeline', () => {
+    const job1 = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:15:20Z',
+      timeline: { cpu_pct: [10, 20], mem_mb: [1000, 2000] },
+    });
+    const job2 = makeJobReport('test', {
+      started_at: '2023-11-14T22:15:30Z',
+      ended_at: '2023-11-14T22:18:30Z',
+      timeline: { cpu_pct: [80, 90], mem_mb: [5000, 6000] },
+    });
+
+    const merged = mergeReports([job1, job2]);
+    expect(merged.cpu.avg).toBe(50); // (10+20+80+90)/4
+    expect(merged.cpu.min).toBe(10);
+    expect(merged.cpu.max).toBe(90);
+  });
+
+  it('collects steps from all jobs', () => {
+    const step1 = { name: 'Checkout', number: 1, duration_seconds: 6, cpu_avg: 20, cpu_max: 40, mem_avg_mb: 1024, mem_max_mb: 2048, sample_count: 2, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' };
+    const step2 = { name: 'Build', number: 2, duration_seconds: 60, cpu_avg: 70, cpu_max: 95, mem_avg_mb: 4096, mem_max_mb: 6000, sample_count: 20, started_at: '2023-11-14T22:13:27Z', completed_at: '2023-11-14T22:14:27Z' };
+    const step3 = { name: 'Run tests', number: 1, duration_seconds: 120, cpu_avg: 50, cpu_max: 80, mem_avg_mb: 2048, mem_max_mb: 3072, sample_count: 40, started_at: '2023-11-14T22:14:30Z', completed_at: '2023-11-14T22:16:30Z' };
+
+    const job1 = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:14:27Z',
+      steps: [step1, step2],
+    });
+    const job2 = makeJobReport('test', {
+      started_at: '2023-11-14T22:14:30Z',
+      ended_at: '2023-11-14T22:16:30Z',
+      steps: [step3],
+    });
+
+    const merged = mergeReports([job1, job2]);
+    expect(merged.steps).toHaveLength(3);
+    expect(merged.steps![0].name).toBe('Checkout');
+    expect(merged.steps![2].name).toBe('Run tests');
+  });
+
+  it('deduplicates top processes by name keeping highest CPU', () => {
+    const job1 = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:15:20Z',
+      top_processes: [
+        { pid: 1, name: 'node', cpu_pct: 35, mem_mb: 256 },
+        { pid: 2, name: 'gcc', cpu_pct: 60, mem_mb: 512 },
+      ],
+    });
+    const job2 = makeJobReport('test', {
+      started_at: '2023-11-14T22:15:30Z',
+      ended_at: '2023-11-14T22:18:30Z',
+      top_processes: [
+        { pid: 3, name: 'node', cpu_pct: 80, mem_mb: 400 },
+        { pid: 4, name: 'jest', cpu_pct: 50, mem_mb: 300 },
+      ],
+    });
+
+    const merged = mergeReports([job1, job2]);
+    const node = merged.top_processes.find((p) => p.name === 'node');
+    expect(node).toBeDefined();
+    expect(node!.cpu_pct).toBe(80);
+    expect(merged.top_processes).toHaveLength(3); // node, gcc, jest
+  });
+
+  it('computes weighted average for load', () => {
+    const job1 = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:15:20Z',
+      sample_count: 20,
+      load: { avg_1m: 2.0, max_1m: 4.0 },
+    });
+    const job2 = makeJobReport('test', {
+      started_at: '2023-11-14T22:15:30Z',
+      ended_at: '2023-11-14T22:18:30Z',
+      sample_count: 80,
+      load: { avg_1m: 1.0, max_1m: 3.0 },
+    });
+
+    const merged = mergeReports([job1, job2]);
+    // Weighted avg: (2.0*20 + 1.0*80) / 100 = 1.2
+    expect(merged.load.avg_1m).toBeCloseTo(1.2);
+    expect(merged.load.max_1m).toBe(4.0);
+  });
+
+  it('handles single job (passthrough)', () => {
+    const job = makeJobReport('build', {
+      sample_count: 50,
+      timeline: { cpu_pct: [10, 20, 30], mem_mb: [1000, 2000, 3000] },
+    });
+
+    const merged = mergeReports([job]);
+    expect(merged.sample_count).toBe(50);
+    expect(merged.timeline!.cpu_pct).toEqual([10, 20, 30]);
+    expect(merged.system).toEqual(makeSysInfo());
+  });
+
+  it('sorts jobs chronologically before merging', () => {
+    const later = makeJobReport('test', {
+      started_at: '2023-11-14T22:20:00Z',
+      ended_at: '2023-11-14T22:25:00Z',
+    });
+    const earlier = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:15:20Z',
+    });
+
+    // Pass in reverse order
+    const merged = mergeReports([later, earlier]);
+    expect(merged.started_at).toBe('2023-11-14T22:13:20Z');
+    expect(merged.system).toEqual(makeSysInfo());
+  });
+
+  it('omits timeline when no jobs have timeline data', () => {
+    const job1 = makeJobReport('build', {
+      started_at: '2023-11-14T22:13:20Z',
+      ended_at: '2023-11-14T22:15:20Z',
+    });
+    const job2 = makeJobReport('test', {
+      started_at: '2023-11-14T22:15:30Z',
+      ended_at: '2023-11-14T22:18:30Z',
+    });
+
+    const merged = mergeReports([job1, job2]);
+    expect(merged.timeline).toBeUndefined();
   });
 });

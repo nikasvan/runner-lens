@@ -1,6 +1,16 @@
 // ─────────────────────────────────────────────────────────────
 // RunnerLens — Dark-Themed SVG Chart Rendering
+//
+// Strategy: Render charts as SVG, convert to PNG via rsvg-convert
+// (pre-installed on GitHub Ubuntu runners), embed as
+// data:image/png;base64 which GitHub allows. Falls back to
+// HTML/markdown when rsvg-convert is unavailable.
 // ─────────────────────────────────────────────────────────────
+
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { exec } from '@actions/exec';
 
 // ── Theme ────────────────────────────────────────────────────
 
@@ -30,7 +40,7 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '\u2026' : s;
 }
 
-function fmtDuration(sec: number): string {
+export function fmtDuration(sec: number): string {
   if (sec < 60) return `${Math.round(sec)}s`;
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
@@ -44,10 +54,49 @@ function fmtTime(iso: string): string {
   return `${h}:${m}`;
 }
 
-/** Encode SVG as a base64 <img> tag for GitHub Job Summary. */
-export function svgImg(svg: string, alt: string): string {
-  const b64 = Buffer.from(svg).toString('base64');
-  return `<img src="data:image/svg+xml;base64,${b64}" alt="${esc(alt)}">`;
+// ── SVG → PNG conversion ────────────────────────────────────
+
+let _hasRsvg: boolean | null = null;
+
+async function hasRsvgConvert(): Promise<boolean> {
+  if (_hasRsvg !== null) return _hasRsvg;
+  try {
+    await exec('rsvg-convert', ['--version'], { silent: true });
+    _hasRsvg = true;
+  } catch {
+    _hasRsvg = false;
+  }
+  return _hasRsvg;
+}
+
+/**
+ * Convert an SVG string to a PNG data URI via rsvg-convert.
+ * Returns null if rsvg-convert is not available.
+ */
+export async function svgToPngDataUri(svg: string): Promise<string | null> {
+  if (!(await hasRsvgConvert())) return null;
+
+  const tmp = path.join(os.tmpdir(), `runnerlens-${Date.now()}`);
+  const svgFile = `${tmp}.svg`;
+  const pngFile = `${tmp}.png`;
+  try {
+    fs.writeFileSync(svgFile, svg);
+    await exec('rsvg-convert', [svgFile, '-o', pngFile, '-b', BG], {
+      silent: true,
+    });
+    const png = fs.readFileSync(pngFile);
+    return `data:image/png;base64,${png.toString('base64')}`;
+  } catch {
+    return null;
+  } finally {
+    try { fs.unlinkSync(svgFile); } catch { /* ok */ }
+    try { fs.unlinkSync(pngFile); } catch { /* ok */ }
+  }
+}
+
+/** Wrap a data URI in an <img> tag. */
+export function imgTag(dataUri: string, alt: string): string {
+  return `<img src="${dataUri}" alt="${esc(alt)}">`;
 }
 
 // ── Monotone Cubic Hermite Interpolation (Fritsch-Carlson) ──
@@ -61,8 +110,6 @@ function monotoneCubicPath(pts: Point[]): string {
     return `M${pts[0].x},${pts[0].y}L${pts[1].x},${pts[1].y}`;
 
   const n = pts.length;
-
-  // Step 1: compute secant slopes (delta_k)
   const delta: number[] = [];
   const h: number[] = [];
   for (let i = 0; i < n - 1; i++) {
@@ -70,7 +117,6 @@ function monotoneCubicPath(pts: Point[]): string {
     delta.push(h[i] !== 0 ? (pts[i + 1].y - pts[i].y) / h[i] : 0);
   }
 
-  // Step 2: initialize tangents
   const m: number[] = new Array(n);
   m[0] = delta[0];
   m[n - 1] = delta[n - 2];
@@ -82,7 +128,6 @@ function monotoneCubicPath(pts: Point[]): string {
     }
   }
 
-  // Step 3: Fritsch-Carlson monotonicity constraint
   for (let i = 0; i < n - 1; i++) {
     if (delta[i] === 0) {
       m[i] = 0;
@@ -99,7 +144,6 @@ function monotoneCubicPath(pts: Point[]): string {
     }
   }
 
-  // Step 4: build SVG cubic bezier path
   let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
   for (let i = 0; i < n - 1; i++) {
     const dx = (pts[i + 1].x - pts[i].x) / 3;
@@ -115,7 +159,7 @@ function monotoneCubicPath(pts: Point[]): string {
   return d;
 }
 
-// ── Stat Cards ───────────────────────────────────────────────
+// ── SVG Stat Cards ───────────────────────────────────────────
 
 export interface StatCard {
   label: string;
@@ -155,7 +199,7 @@ export function renderStatCards(cards: StatCard[]): string {
 </svg>`;
 }
 
-// ── Area Chart ───────────────────────────────────────────────
+// ── SVG Area Chart ───────────────────────────────────────────
 
 export interface AreaChartOpts {
   title: string;
@@ -171,47 +215,31 @@ export interface AreaChartOpts {
 
 export function renderAreaChart(opts: AreaChartOpts): string {
   const {
-    title,
-    values,
-    color,
-    yLabel,
-    startedAt,
-    endedAt,
-    currentValue,
-    steps,
-    formatY = (v) => v.toFixed(0),
+    title, values, color, yLabel, startedAt, endedAt,
+    currentValue, steps, formatY = (v) => v.toFixed(0),
   } = opts;
 
-  const W = 760;
-  const H = 220;
+  const W = 760; const H = 220;
   const pad = { top: 40, right: 20, bottom: 40, left: 52 };
   const chartW = W - pad.left - pad.right;
   const chartH = H - pad.top - pad.bottom;
-
-  // Y-axis range
   const yMax = Math.max(...values, 1) * 1.15;
   const yMin = 0;
 
-  // Scale helpers
   const sx = (i: number) =>
     pad.left + (i / Math.max(values.length - 1, 1)) * chartW;
   const sy = (v: number) =>
     pad.top + chartH - ((v - yMin) / (yMax - yMin)) * chartH;
 
-  // Build data points
   const pts: Point[] = values.map((v, i) => ({ x: sx(i), y: sy(v) }));
   const curvePath = monotoneCubicPath(pts);
-
-  // Fill path (close to bottom)
   const fillPath =
     curvePath +
     `L${pts[pts.length - 1].x.toFixed(1)},${(pad.top + chartH).toFixed(1)}` +
     `L${pts[0].x.toFixed(1)},${(pad.top + chartH).toFixed(1)}Z`;
 
-  // Gradient ID
   const gradId = `grad-${color.replace('#', '')}`;
 
-  // Grid lines (4 horizontal)
   const gridLines: string[] = [];
   const yLabels: string[] = [];
   for (let i = 0; i <= 4; i++) {
@@ -225,44 +253,23 @@ export function renderAreaChart(opts: AreaChartOpts): string {
     );
   }
 
-  // Step separators
-  const stepSeparators: string[] = [];
+  const stepSeps: string[] = [];
   if (steps && steps.length > 0) {
-    const totalStart = new Date(startedAt).getTime();
-    const totalEnd = new Date(endedAt).getTime();
-    const totalDur = totalEnd - totalStart || 1;
-
+    const tStart = new Date(startedAt).getTime();
+    const tEnd = new Date(endedAt).getTime();
+    const tDur = tEnd - tStart || 1;
     for (const step of steps) {
-      const stepStart = new Date(step.startedAt).getTime();
-      const frac = (stepStart - totalStart) / totalDur;
+      const frac = (new Date(step.startedAt).getTime() - tStart) / tDur;
       if (frac <= 0.01 || frac >= 0.99) continue;
       const x = pad.left + frac * chartW;
-      stepSeparators.push(
+      stepSeps.push(
         `<line x1="${x.toFixed(1)}" y1="${pad.top}" x2="${x.toFixed(1)}" y2="${pad.top + chartH}" stroke="${BORDER}" stroke-width="1" stroke-dasharray="4,3"/>`,
-      );
-      stepSeparators.push(
         `<text x="${(x + 4).toFixed(1)}" y="${pad.top - 4}" fill="${MUTED}" font-size="9" font-family="${FONT}" transform="rotate(-30,${(x + 4).toFixed(1)},${pad.top - 4})">${esc(truncate(step.name, 18))}</text>`,
       );
     }
   }
 
-  // X-axis labels (start + end time)
-  const xLabels = `
-    <text x="${pad.left}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}">${esc(fmtTime(startedAt))}</text>
-    <text x="${W - pad.right}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(fmtTime(endedAt))}</text>`;
-
-  // Title + current value annotation
-  const titleText = `<text x="${pad.left}" y="24" fill="${TEXT}" font-size="14" font-weight="bold" font-family="${FONT}">${esc(title)}</text>`;
-  const valueAnnotation = currentValue
-    ? `<text x="${W - pad.right}" y="24" fill="${color}" font-size="13" font-family="${FONT}" text-anchor="end">${esc(currentValue)}</text>`
-    : '';
-
-  // Endpoint glow dot
   const lastPt = pts[pts.length - 1];
-  const glowDot = lastPt
-    ? `<circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="4" fill="${color}" opacity="0.6"/>
-       <circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="2" fill="${color}"/>`
-    : '';
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"
   viewBox="0 0 ${W} ${H}" role="img">
@@ -273,20 +280,22 @@ export function renderAreaChart(opts: AreaChartOpts): string {
     </linearGradient>
   </defs>
   <rect width="${W}" height="${H}" fill="${BG}" rx="8"/>
-  ${titleText}
-  ${valueAnnotation}
+  <text x="${pad.left}" y="24" fill="${TEXT}" font-size="14" font-weight="bold" font-family="${FONT}">${esc(title)}</text>
+  ${currentValue ? `<text x="${W - pad.right}" y="24" fill="${color}" font-size="13" font-family="${FONT}" text-anchor="end">${esc(currentValue)}</text>` : ''}
   ${gridLines.join('\n  ')}
   ${yLabels.join('\n  ')}
-  ${stepSeparators.join('\n  ')}
+  ${stepSeps.join('\n  ')}
   <path d="${fillPath}" fill="url(#${gradId})"/>
   <path d="${curvePath}" fill="none" stroke="${color}" stroke-width="2"/>
-  ${glowDot}
-  ${xLabels}
+  <circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="4" fill="${color}" opacity="0.6"/>
+  <circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="2" fill="${color}"/>
+  <text x="${pad.left}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}">${esc(fmtTime(startedAt))}</text>
+  <text x="${W - pad.right}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(fmtTime(endedAt))}</text>
   <text x="${pad.left + chartW / 2}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="middle">${esc(yLabel)}</text>
 </svg>`;
 }
 
-// ── Gantt / Timeline Chart ───────────────────────────────────
+// ── SVG Gantt / Timeline ─────────────────────────────────────
 
 export interface GanttStep {
   name: string;
@@ -310,7 +319,6 @@ export function pickGanttColor(index: number): string {
 
 export function renderGanttChart(opts: GanttChartOpts): string {
   const { steps, totalStartedAt, totalEndedAt } = opts;
-
   const rowH = 32;
   const nameColW = 180;
   const durColW = 64;
@@ -328,7 +336,6 @@ export function renderGanttChart(opts: GanttChartOpts): string {
     .map((step, i) => {
       const y = pad.top + i * rowH;
       const barX = pad.left + nameColW + barPad;
-
       const sStart = new Date(step.startedAt).getTime();
       const sEnd = new Date(step.completedAt).getTime();
       const fracStart = Math.max(0, (sStart - totalStart) / totalDur);
@@ -344,16 +351,78 @@ export function renderGanttChart(opts: GanttChartOpts): string {
     })
     .join('');
 
-  const titleText = `<text x="${pad.left + 4}" y="24" fill="${TEXT}" font-size="14" font-weight="bold" font-family="${FONT}">Execution Timeline</text>`;
-  const timeLabels = `
-    <text x="${pad.left + nameColW + barPad}" y="24" fill="${MUTED}" font-size="10" font-family="${FONT}">${esc(fmtTime(totalStartedAt))}</text>
-    <text x="${pad.left + nameColW + barPad + barAreaW}" y="24" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(fmtTime(totalEndedAt))}</text>`;
-
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"
   viewBox="0 0 ${W} ${H}" role="img">
   <rect width="${W}" height="${H}" fill="${BG}" rx="8"/>
-  ${titleText}
-  ${timeLabels}
+  <text x="${pad.left + 4}" y="24" fill="${TEXT}" font-size="14" font-weight="bold" font-family="${FONT}">Execution Timeline</text>
+  <text x="${pad.left + nameColW + barPad}" y="24" fill="${MUTED}" font-size="10" font-family="${FONT}">${esc(fmtTime(totalStartedAt))}</text>
+  <text x="${pad.left + nameColW + barPad + barAreaW}" y="24" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(fmtTime(totalEndedAt))}</text>
   ${rows}
 </svg>`;
+}
+
+// ── HTML Fallback (when rsvg-convert is unavailable) ─────────
+
+export interface FallbackStatCard {
+  label: string;
+  value: string;
+  sub?: string;
+}
+
+export function renderStatCardsFallback(cards: FallbackStatCard[]): string {
+  const headers = cards.map((c) => `<th align="center">${esc(c.label)}</th>`).join('');
+  const values = cards.map((c) => `<td align="center"><b>${esc(c.value)}</b></td>`).join('');
+  const subs = cards.map((c) =>
+    `<td align="center"><sub>${c.sub ? esc(c.sub) : ''}</sub></td>`,
+  ).join('');
+  return `<table>\n<tr>${headers}</tr>\n<tr>${values}</tr>\n<tr>${subs}</tr>\n</table>`;
+}
+
+const SPARK_CHARS = ['\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588'];
+
+export function sparkline(values: number[], width = 60): string {
+  if (values.length === 0) return '';
+  const buckets: number[] = [];
+  if (values.length <= width) {
+    buckets.push(...values);
+  } else {
+    const step = values.length / width;
+    for (let i = 0; i < width; i++) {
+      const lo = Math.floor(i * step);
+      const hi = Math.min(Math.floor((i + 1) * step), values.length);
+      let sum = 0;
+      for (let j = lo; j < hi; j++) sum += values[j];
+      buckets.push(sum / (hi - lo));
+    }
+  }
+  const min = Math.min(...buckets);
+  const max = Math.max(...buckets);
+  const range = max - min || 1;
+  return buckets
+    .map((v) => {
+      const idx = Math.round(((v - min) / range) * (SPARK_CHARS.length - 1));
+      return SPARK_CHARS[idx];
+    })
+    .join('');
+}
+
+const FB_BAR_WIDTH = 30;
+const FB_FILLED = '\u2588';
+const FB_EMPTY  = '\u2591';
+
+export function renderGanttFallback(opts: { steps: { name: string; startedAt: string; completedAt: string; durationSec: number }[]; totalStartedAt: string; totalEndedAt: string }): string {
+  const totalStart = new Date(opts.totalStartedAt).getTime();
+  const totalEnd = new Date(opts.totalEndedAt).getTime();
+  const totalDur = totalEnd - totalStart || 1;
+
+  const rows = opts.steps.map((step) => {
+    const fracStart = Math.max(0, (new Date(step.startedAt).getTime() - totalStart) / totalDur);
+    const fracEnd = Math.min(1, (new Date(step.completedAt).getTime() - totalStart) / totalDur);
+    const startCol = Math.round(fracStart * FB_BAR_WIDTH);
+    const endCol = Math.max(startCol + 1, Math.round(fracEnd * FB_BAR_WIDTH));
+    const bar = FB_EMPTY.repeat(startCol) + FB_FILLED.repeat(endCol - startCol) + FB_EMPTY.repeat(Math.max(0, FB_BAR_WIDTH - endCol));
+    return `| ${esc(truncate(step.name, 28))} | <code>${bar}</code> | ${esc(fmtDuration(step.durationSec))} |`;
+  });
+
+  return ['| Step | Timeline | Duration |', '|:--|:--|--:|', ...rows].join('\n');
 }

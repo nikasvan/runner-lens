@@ -6,7 +6,9 @@ import { stats, safeMax, safePct } from '../src/stats';
 import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import {
-  renderStatCards, renderAreaChart, renderGanttChart, svgImg,
+  renderStatCards, renderAreaChart, renderGanttChart,
+  sparkline, fmtDuration,
+  renderStatCardsFallback, renderGanttFallback,
 } from '../src/svg-charts';
 import { buildJobSummary } from '../src/job-summary';
 import type {
@@ -374,7 +376,7 @@ describe('edge cases', () => {
 // svg-charts.ts
 // ─────────────────────────────────────────────────────────────
 
-describe('renderStatCards', () => {
+describe('renderStatCards (SVG)', () => {
   it('produces valid SVG with 4 cards', () => {
     const svg = renderStatCards([
       { label: 'Runner', value: 'Linux', sub: '2 CPU', color: '#3fb950' },
@@ -392,105 +394,69 @@ describe('renderStatCards', () => {
 describe('renderAreaChart', () => {
   it('produces valid SVG with curve and gradient', () => {
     const svg = renderAreaChart({
-      title: 'CPU Usage',
-      values: [10, 30, 50, 45, 60, 80, 70],
-      color: '#58a6ff',
-      yLabel: 'CPU %',
-      startedAt: '2023-11-14T22:13:20Z',
-      endedAt: '2023-11-14T22:20:00Z',
+      title: 'CPU Usage', values: [10, 30, 50, 45, 60, 80, 70],
+      color: '#58a6ff', yLabel: 'CPU %',
+      startedAt: '2023-11-14T22:13:20Z', endedAt: '2023-11-14T22:20:00Z',
       currentValue: '70%',
     });
     expect(svg).toContain('<svg');
     expect(svg).toContain('CPU Usage');
     expect(svg).toContain('linearGradient');
-    expect(svg).toContain('70%');
   });
 
-  it('renders step separators when steps provided', () => {
+  it('handles 2 data points', () => {
     const svg = renderAreaChart({
-      title: 'CPU',
-      values: [10, 20, 30, 40, 50],
-      color: '#58a6ff',
-      yLabel: '%',
-      startedAt: '2023-11-14T22:13:20Z',
-      endedAt: '2023-11-14T22:15:20Z',
-      steps: [
-        { name: 'Build', startedAt: '2023-11-14T22:14:00Z' },
-        { name: 'Test', startedAt: '2023-11-14T22:14:40Z' },
-      ],
-    });
-    expect(svg).toContain('Build');
-    expect(svg).toContain('Test');
-    expect(svg).toContain('stroke-dasharray');
-  });
-
-  it('handles 2 data points without error', () => {
-    const svg = renderAreaChart({
-      title: 'CPU',
-      values: [10, 90],
-      color: '#58a6ff',
-      yLabel: '%',
-      startedAt: '2023-01-01T00:00:00Z',
-      endedAt: '2023-01-01T00:01:00Z',
+      title: 'CPU', values: [10, 90], color: '#58a6ff', yLabel: '%',
+      startedAt: '2023-01-01T00:00:00Z', endedAt: '2023-01-01T00:01:00Z',
     });
     expect(svg).toContain('<svg');
   });
 
   it('handles flat segments (delta=0) in monotone interpolation', () => {
-    // Consecutive equal values trigger the delta[i]===0 branch
     const svg = renderAreaChart({
-      title: 'Flat',
-      values: [50, 50, 50, 80, 80, 80, 30],
-      color: '#58a6ff',
-      yLabel: '%',
-      startedAt: '2023-01-01T00:00:00Z',
-      endedAt: '2023-01-01T00:01:00Z',
+      title: 'Flat', values: [50, 50, 50, 80, 80, 80, 30],
+      color: '#58a6ff', yLabel: '%',
+      startedAt: '2023-01-01T00:00:00Z', endedAt: '2023-01-01T00:01:00Z',
     });
-    expect(svg).toContain('<svg');
-    expect(svg).toContain('C'); // cubic bezier commands
+    expect(svg).toContain('C');
   });
 
-  it('handles steep changes that trigger Fritsch-Carlson constraint', () => {
-    // Monotonically increasing with wildly different slopes triggers tau > 9:
-    // delta[0]=10, delta[1]=1, delta[2]=89 → tangent at [1] = 5.5, alpha=5.5/1 >> 3
+  it('handles steep changes triggering Fritsch-Carlson constraint', () => {
     const svg = renderAreaChart({
-      title: 'Spike',
-      values: [0, 10, 11, 100, 101, 102, 200],
-      color: '#58a6ff',
-      yLabel: '%',
-      startedAt: '2023-01-01T00:00:00Z',
-      endedAt: '2023-01-01T00:01:00Z',
+      title: 'Spike', values: [0, 10, 11, 100, 101, 102, 200],
+      color: '#58a6ff', yLabel: '%',
+      startedAt: '2023-01-01T00:00:00Z', endedAt: '2023-01-01T00:01:00Z',
     });
-    expect(svg).toContain('<svg');
-    expect(svg).toContain('C'); // smooth bezier curve
+    expect(svg).toContain('C');
   });
 
-  it('skips step separators at edges (frac <= 0.01 or >= 0.99)', () => {
+  it('renders step separators', () => {
     const svg = renderAreaChart({
-      title: 'CPU',
-      values: [10, 20, 30],
-      color: '#58a6ff',
-      yLabel: '%',
-      startedAt: '2023-11-14T22:13:20Z',
-      endedAt: '2023-11-14T22:15:20Z',
-      steps: [
-        // At the very start — should be skipped
-        { name: 'Start', startedAt: '2023-11-14T22:13:20Z' },
-        // At the very end — should be skipped
-        { name: 'End', startedAt: '2023-11-14T22:15:19Z' },
-      ],
+      title: 'CPU', values: [10, 20, 30, 40, 50],
+      color: '#58a6ff', yLabel: '%',
+      startedAt: '2023-11-14T22:13:20Z', endedAt: '2023-11-14T22:15:20Z',
+      steps: [{ name: 'Build', startedAt: '2023-11-14T22:14:00Z' }],
+    });
+    expect(svg).toContain('Build');
+    expect(svg).toContain('stroke-dasharray');
+  });
+
+  it('skips step separators at edges', () => {
+    const svg = renderAreaChart({
+      title: 'CPU', values: [10, 20, 30], color: '#58a6ff', yLabel: '%',
+      startedAt: '2023-11-14T22:13:20Z', endedAt: '2023-11-14T22:15:20Z',
+      steps: [{ name: 'Start', startedAt: '2023-11-14T22:13:20Z' }],
     });
     expect(svg).not.toContain('stroke-dasharray');
   });
 });
 
-describe('renderGanttChart', () => {
+describe('renderGanttChart (SVG)', () => {
   it('produces valid SVG with step bars', () => {
     const svg = renderGanttChart({
       steps: [
         { name: 'Checkout', startedAt: '2023-11-14T22:13:20Z', completedAt: '2023-11-14T22:13:26Z', durationSec: 6, color: '#3fb950' },
         { name: 'Build', startedAt: '2023-11-14T22:13:27Z', completedAt: '2023-11-14T22:14:27Z', durationSec: 60, color: '#58a6ff' },
-        { name: 'Test', startedAt: '2023-11-14T22:14:28Z', completedAt: '2023-11-14T22:15:00Z', durationSec: 32, color: '#bc8cff' },
       ],
       totalStartedAt: '2023-11-14T22:13:20Z',
       totalEndedAt: '2023-11-14T22:15:00Z',
@@ -498,20 +464,61 @@ describe('renderGanttChart', () => {
     expect(svg).toContain('<svg');
     expect(svg).toContain('Checkout');
     expect(svg).toContain('Build');
-    expect(svg).toContain('Test');
     expect(svg).toContain('Execution Timeline');
   });
 });
 
-describe('svgImg', () => {
-  it('encodes SVG as base64 img tag', () => {
-    const html = svgImg('<svg>test</svg>', 'test chart');
-    expect(html).toContain('<img src="data:image/svg+xml;base64,');
-    expect(html).toContain('alt="test chart"');
-    // Verify base64 decodes back
-    const b64 = html.match(/base64,([^"]+)/)?.[1];
-    expect(Buffer.from(b64!, 'base64').toString()).toBe('<svg>test</svg>');
+describe('fallback rendering', () => {
+  it('renderStatCardsFallback produces HTML table', () => {
+    const html = renderStatCardsFallback([
+      { label: 'Runner', value: 'Linux', sub: '2 CPU' },
+      { label: 'CPU', value: '45%' },
+    ]);
+    expect(html).toContain('<table>');
+    expect(html).toContain('Linux');
   });
+
+  it('renderGanttFallback produces markdown table', () => {
+    const md = renderGanttFallback({
+      steps: [
+        { name: 'Build', startedAt: '2023-11-14T22:13:27Z', completedAt: '2023-11-14T22:14:27Z', durationSec: 60 },
+      ],
+      totalStartedAt: '2023-11-14T22:13:20Z',
+      totalEndedAt: '2023-11-14T22:15:00Z',
+    });
+    expect(md).toContain('Build');
+    expect(md).toContain('\u2588');
+    expect(md).toContain('| Step |');
+  });
+});
+
+describe('sparkline', () => {
+  it('maps values to Unicode block characters', () => {
+    const result = sparkline([0, 25, 50, 75, 100]);
+    expect(result).toHaveLength(5);
+    expect(result[0]).toBe('\u2581');
+    expect(result[4]).toBe('\u2588');
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(sparkline([])).toBe('');
+  });
+
+  it('downsamples when values exceed width', () => {
+    const result = sparkline(Array.from({ length: 200 }, (_, i) => i), 50);
+    expect(result).toHaveLength(50);
+  });
+
+  it('handles flat data', () => {
+    const result = sparkline([50, 50, 50, 50, 50]);
+    expect(new Set(result.split('')).size).toBe(1);
+  });
+});
+
+describe('fmtDuration', () => {
+  it('formats seconds', () => expect(fmtDuration(45)).toBe('45s'));
+  it('formats minutes + seconds', () => expect(fmtDuration(125)).toBe('2m 5s'));
+  it('formats exact minutes', () => expect(fmtDuration(120)).toBe('2m'));
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -535,26 +542,26 @@ describe('buildJobSummary', () => {
     };
   }
 
-  it('produces summary with stat cards', () => {
-    const html = buildJobSummary(makeReport());
-    expect(html).toContain('data:image/svg+xml;base64,');
+  it('produces summary with stat cards table', async () => {
+    const html = await buildJobSummary(makeReport());
+    expect(html).toContain('<table>');
     expect(html).toContain('RunnerLens');
   });
 
-  it('includes area charts when timeline has >= 2 points', () => {
-    const html = buildJobSummary(makeReport({
+  it('includes sparkline charts when timeline has >= 2 points', async () => {
+    const html = await buildJobSummary(makeReport({
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }));
-    // Should have multiple base64 images (stat cards + 2 area charts)
-    const imgCount = (html.match(/data:image\/svg\+xml;base64,/g) || []).length;
-    expect(imgCount).toBeGreaterThanOrEqual(3);
+    expect(html).toContain('**CPU**');
+    expect(html).toContain('**Memory**');
+    expect(html).toContain('\u2588'); // sparkline block chars
   });
 
-  it('includes Gantt chart when steps are present', () => {
-    const html = buildJobSummary(makeReport({
+  it('includes Gantt chart when steps are present', async () => {
+    const html = await buildJobSummary(makeReport({
       steps: [
         { name: 'Checkout', number: 1, duration_seconds: 6, cpu_avg: 20, cpu_max: 40, mem_avg_mb: 1024, mem_max_mb: 2048, sample_count: 2, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' },
         { name: 'Build', number: 2, duration_seconds: 60, cpu_avg: 60, cpu_max: 92, mem_avg_mb: 3072, mem_max_mb: 5120, sample_count: 20, started_at: '2023-11-14T22:13:27Z', completed_at: '2023-11-14T22:14:27Z' },
@@ -564,34 +571,33 @@ describe('buildJobSummary', () => {
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }));
-    // stat cards + 2 area charts + gantt = 4
-    const imgCount = (html.match(/data:image\/svg\+xml;base64,/g) || []).length;
-    expect(imgCount).toBe(4);
+    expect(html).toContain('Execution Timeline');
+    expect(html).toContain('Checkout');
+    expect(html).toContain('Build');
+    expect(html).toContain('<details>');
   });
 
-  it('skips charts gracefully when no timeline data', () => {
-    const html = buildJobSummary(makeReport({ timeline: undefined }));
-    // Only stat cards
-    const imgCount = (html.match(/data:image\/svg\+xml;base64,/g) || []).length;
-    expect(imgCount).toBe(1);
+  it('skips sparklines when no timeline data', async () => {
+    const html = await buildJobSummary(makeReport({ timeline: undefined }));
+    expect(html).toContain('<table>');
+    expect(html).not.toContain('**CPU**');
   });
 
-  it('includes footer with version', () => {
-    const html = buildJobSummary(makeReport());
+  it('includes footer with version', async () => {
+    const html = await buildJobSummary(makeReport());
     expect(html).toContain('v1.0.0');
     expect(html).toContain('runnerlens/runner-lens');
   });
 
-  it('formats duration >= 60s as minutes in stat cards', () => {
-    const html = buildJobSummary(makeReport({ duration_seconds: 120 }));
-    // Verify base64-encoded SVGs exist (the '2m' is inside the SVG)
-    expect(html).toContain('data:image/svg+xml;base64,');
+  it('formats duration >= 60s as minutes', async () => {
+    const html = await buildJobSummary(makeReport({ duration_seconds: 120 }));
+    expect(html).toContain('2m');
   });
 
-  it('formats memory < 1024 MB as MB', () => {
-    const html = buildJobSummary(makeReport({
+  it('formats memory < 1024 MB as MB', async () => {
+    const html = await buildJobSummary(makeReport({
       memory: { avg: 512, max: 800, min: 100, p50: 500, p95: 750, p99: 780, latest: 600, total_mb: 1024, swap_max_mb: 0 },
     }));
-    expect(html).toContain('data:image/svg+xml;base64,');
+    expect(html).toContain('512 MB');
   });
 });

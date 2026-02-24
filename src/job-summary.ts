@@ -658,6 +658,68 @@ function buildGanttFallback(ganttJobs: GanttJob[]): string {
   return lines.join('\n');
 }
 
+// ── Workflow Banner (rendered as image via QuickChart) ────────
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function buildWorkflowBannerConfig(jobCount: number): Record<string, any> {
+  const annotations: Record<string, any> = {
+    bg: {
+      type: 'box', xMin: 0, xMax: 1, yMin: 0, yMax: 1,
+      backgroundColor: '#24292f', borderWidth: 0, borderRadius: 8,
+    },
+    accent: {
+      type: 'box', xMin: 0, xMax: 1, yMin: 0.85, yMax: 1.0,
+      backgroundColor: '#2f81f7', borderWidth: 0,
+      borderRadius: { topLeft: 8, topRight: 8, bottomLeft: 0, bottomRight: 0 },
+    },
+    title: {
+      type: 'label', xValue: 0.5, yValue: 0.40,
+      content: ['Workflow Summary'],
+      color: '#ffffff',
+      font: { size: 18, weight: 'bold' },
+    },
+    sub: {
+      type: 'label', xValue: 0.5, yValue: 0.02,
+      content: [`RunnerLens \u00b7 ${jobCount} job${jobCount !== 1 ? 's' : ''}`],
+      color: '#8b949e',
+      font: { size: 11 },
+    },
+  };
+
+  return {
+    type: 'scatter',
+    data: { datasets: [{ data: [] }] },
+    options: {
+      layout: { padding: 0 },
+      scales: {
+        x: { display: false, min: -0.02, max: 1.02 },
+        y: { display: false, min: -0.15, max: 1.15 },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        annotation: { annotations },
+      },
+    },
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+async function buildWorkflowBanner(jobCount: number): Promise<string> {
+  const config = buildWorkflowBannerConfig(jobCount);
+  const body = JSON.stringify({
+    version: CHART_VERSION,
+    backgroundColor: CHART_BG,
+    width: 760,
+    height: 60,
+    devicePixelRatio: 2,
+    format: 'png',
+    chart: config,
+  });
+  const url = await postQuickChart(body);
+  return `<img src="${url}" alt="Workflow Summary" width="760">`;
+}
+
 // ── Public API ───────────────────────────────────────────────
 
 export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport[]): Promise<string> {
@@ -665,7 +727,11 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
   const isMultiJob = jobs && jobs.length > 1;
 
   if (isMultiJob) {
-    parts.push('<h2>Workflow Summary</h2>');
+    try {
+      parts.push(await buildWorkflowBanner(jobs!.length));
+    } catch {
+      parts.push('<h2>Workflow Summary</h2>');
+    }
   }
 
   // Stat cards (image with fallback to markdown)
@@ -688,10 +754,14 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
         const memJobTimelines: JobTimeline[] = [];
         for (const job of jobs!) {
           if (job.report.timeline) {
-            const jobSteps = job.report.steps ?? [];
+            // Filter to steps with valid completed_at (exclude in-progress / null)
+            const jobSteps = (job.report.steps ?? []).filter(
+              (s) => s.completed_at && !isNaN(new Date(s.completed_at).getTime()),
+            );
             const jobStartMs = new Date(job.report.started_at).getTime();
             const jobEndMs = new Date(job.report.ended_at).getTime();
             const totalDur = jobEndMs - jobStartMs || 1;
+            const timelineLen = job.report.timeline.cpu_pct.length;
 
             // Use last step's end time as effective end (avoid idle tail)
             let effectiveEndMs = jobEndMs;
@@ -701,7 +771,7 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
             }
 
             const keepRatio = (effectiveEndMs - jobStartMs) / totalDur;
-            const keepCount = Math.max(1, Math.ceil(keepRatio * job.report.timeline.cpu_pct.length));
+            const keepCount = Math.min(timelineLen, Math.max(2, Math.ceil(keepRatio * timelineLen)));
 
             cpuJobTimelines.push({
               jobName: job.jobName,
@@ -719,7 +789,9 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
         }
 
         // Use step-based end time for chart labels to avoid empty space
-        const allJobSteps = jobs!.flatMap(j => j.report.steps ?? []);
+        const allJobSteps = jobs!.flatMap(j => j.report.steps ?? []).filter(
+          (s) => s.completed_at && !isNaN(new Date(s.completed_at).getTime()),
+        );
         let chartStartedAt = report.started_at;
         let chartEndedAt = report.ended_at;
         if (allJobSteps.length > 0) {
@@ -747,7 +819,10 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
         let chartCpuPct = timeline.cpu_pct;
         let chartMemMb = timeline.mem_mb;
 
-        const singleJobSteps = report.steps ?? [];
+        // Filter to steps with valid completed_at (exclude in-progress / null)
+        const singleJobSteps = (report.steps ?? []).filter(
+          (s) => s.completed_at && !isNaN(new Date(s.completed_at).getTime()),
+        );
         if (singleJobSteps.length > 0) {
           const reportStartMs = new Date(report.started_at).getTime();
           const reportEndMs = new Date(report.ended_at).getTime();
@@ -755,7 +830,8 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
           const lastStepMs = Math.max(...singleJobSteps.map(s => new Date(s.completed_at).getTime()));
           const effectiveEnd = Math.min(lastStepMs, reportEndMs);
           const keepRatio = (effectiveEnd - reportStartMs) / totalDur;
-          const keepCount = Math.max(1, Math.ceil(keepRatio * timeline.cpu_pct.length));
+          const timelineLen = timeline.cpu_pct.length;
+          const keepCount = Math.min(timelineLen, Math.max(2, Math.ceil(keepRatio * timelineLen)));
           chartCpuPct = timeline.cpu_pct.slice(0, keepCount);
           chartMemMb = timeline.mem_mb.slice(0, keepCount);
           chartEndedAt = new Date(effectiveEnd).toISOString();

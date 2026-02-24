@@ -389,16 +389,13 @@ async function buildMultiJobQuickChart(
   title: string,
   jobTimelines: JobTimeline[],
   yLabel: string,
-  _globalStartedAt: string,
-  _globalEndedAt: string,
+  globalStartedAt: string,
+  globalEndedAt: string,
 ): Promise<string> {
-  // Compute tight bounds from actual job data to avoid empty space
-  const globalStartMs = Math.min(...jobTimelines.map(jt => new Date(jt.startedAt).getTime()));
-  const globalEndMs = Math.max(...jobTimelines.map(jt => new Date(jt.endedAt).getTime()));
-  const tightStart = new Date(globalStartMs).toISOString();
-  const tightEnd = new Date(globalEndMs).toISOString();
+  const globalStartMs = new Date(globalStartedAt).getTime();
+  const globalEndMs = new Date(globalEndedAt).getTime();
   const maxPts = 30;
-  const labels = timeLabels(tightStart, tightEnd, maxPts);
+  const labels = timeLabels(globalStartedAt, globalEndedAt, maxPts);
 
   const chartStr = buildMultiJobChartString(title, jobTimelines, labels, yLabel, globalStartMs, globalEndMs);
   const body = JSON.stringify({
@@ -686,40 +683,86 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
     try {
       if (hasMultiJobTimelines) {
         // Multi-job path: each job = separate colored line
+        // Trim timelines to step-based bounds to avoid empty space from idle collector
         const cpuJobTimelines: JobTimeline[] = [];
         const memJobTimelines: JobTimeline[] = [];
         for (const job of jobs!) {
           if (job.report.timeline) {
+            const jobSteps = job.report.steps ?? [];
+            const jobStartMs = new Date(job.report.started_at).getTime();
+            const jobEndMs = new Date(job.report.ended_at).getTime();
+            const totalDur = jobEndMs - jobStartMs || 1;
+
+            // Use last step's end time as effective end (avoid idle tail)
+            let effectiveEndMs = jobEndMs;
+            if (jobSteps.length > 0) {
+              effectiveEndMs = Math.max(...jobSteps.map(s => new Date(s.completed_at).getTime()));
+              effectiveEndMs = Math.min(effectiveEndMs, jobEndMs);
+            }
+
+            const keepRatio = (effectiveEndMs - jobStartMs) / totalDur;
+            const keepCount = Math.max(1, Math.ceil(keepRatio * job.report.timeline.cpu_pct.length));
+
             cpuJobTimelines.push({
               jobName: job.jobName,
-              values: job.report.timeline.cpu_pct,
+              values: job.report.timeline.cpu_pct.slice(0, keepCount),
               startedAt: job.report.started_at,
-              endedAt: job.report.ended_at,
+              endedAt: new Date(effectiveEndMs).toISOString(),
             });
             memJobTimelines.push({
               jobName: job.jobName,
-              values: job.report.timeline.mem_mb,
+              values: job.report.timeline.mem_mb.slice(0, keepCount),
               startedAt: job.report.started_at,
-              endedAt: job.report.ended_at,
+              endedAt: new Date(effectiveEndMs).toISOString(),
             });
           }
         }
 
+        // Use step-based end time for chart labels to avoid empty space
+        const allJobSteps = jobs!.flatMap(j => j.report.steps ?? []);
+        let chartStartedAt = report.started_at;
+        let chartEndedAt = report.ended_at;
+        if (allJobSteps.length > 0) {
+          chartEndedAt = new Date(
+            Math.max(...allJobSteps.map(s => new Date(s.completed_at).getTime())),
+          ).toISOString();
+        }
+
         const cpuChart = await buildMultiJobQuickChart(
           'CPU Usage (%)', cpuJobTimelines, 'CPU %',
-          report.started_at, report.ended_at,
+          chartStartedAt, chartEndedAt,
         );
         parts.push(cpuChart);
 
         const memChart = await buildMultiJobQuickChart(
           'Memory Usage (MB)', memJobTimelines, 'MB',
-          report.started_at, report.ended_at,
+          chartStartedAt, chartEndedAt,
         );
         parts.push(memChart);
       } else {
         // Single-line path: one color with optional job boundary annotations
-        const tStart = new Date(report.started_at).getTime();
-        const tEnd = new Date(report.ended_at).getTime();
+        // Trim timeline to step-based bounds to avoid empty space from idle collector
+        let chartStartedAt = report.started_at;
+        let chartEndedAt = report.ended_at;
+        let chartCpuPct = timeline.cpu_pct;
+        let chartMemMb = timeline.mem_mb;
+
+        const singleJobSteps = report.steps ?? [];
+        if (singleJobSteps.length > 0) {
+          const reportStartMs = new Date(report.started_at).getTime();
+          const reportEndMs = new Date(report.ended_at).getTime();
+          const totalDur = reportEndMs - reportStartMs || 1;
+          const lastStepMs = Math.max(...singleJobSteps.map(s => new Date(s.completed_at).getTime()));
+          const effectiveEnd = Math.min(lastStepMs, reportEndMs);
+          const keepRatio = (effectiveEnd - reportStartMs) / totalDur;
+          const keepCount = Math.max(1, Math.ceil(keepRatio * timeline.cpu_pct.length));
+          chartCpuPct = timeline.cpu_pct.slice(0, keepCount);
+          chartMemMb = timeline.mem_mb.slice(0, keepCount);
+          chartEndedAt = new Date(effectiveEnd).toISOString();
+        }
+
+        const tStart = new Date(chartStartedAt).getTime();
+        const tEnd = new Date(chartEndedAt).getTime();
         const tDur = tEnd - tStart || 1;
         const ganttJobsForSeps = collectGanttJobs(report, jobs);
         const jobSpans: JobSpan[] = [];
@@ -736,24 +779,24 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
 
         const cpuChart = await buildQuickChart(
           'CPU Usage (%)',
-          timeline.cpu_pct,
+          chartCpuPct,
           'CPU %',
           CPU_COLOR,
           CPU_FILL,
-          report.started_at,
-          report.ended_at,
+          chartStartedAt,
+          chartEndedAt,
           jobSpans.length > 1 ? jobSpans : undefined,
         );
         parts.push(cpuChart);
 
         const memChart = await buildQuickChart(
           'Memory Usage (MB)',
-          timeline.mem_mb,
+          chartMemMb,
           'MB',
           MEM_COLOR,
           MEM_FILL,
-          report.started_at,
-          report.ended_at,
+          chartStartedAt,
+          chartEndedAt,
           jobSpans.length > 1 ? jobSpans : undefined,
         );
         parts.push(memChart);

@@ -42,8 +42,21 @@ export function mergeReports(jobReports: JobReport[]): AggregatedReport {
   const allEndTimes = sorted.map((j) => new Date(j.report.ended_at).getTime());
   const endedAt = new Date(Math.max(...allEndTimes)).toISOString();
 
-  // Duration: max of any individual job (jobs run in parallel)
-  const durationSeconds = Math.max(...sorted.map((j) => j.report.duration_seconds));
+  // Duration: earliest step start → latest step end across all jobs.
+  // This gives the true workflow wall-clock time, accounting for `needs`
+  // dependencies where later jobs may start after earlier ones finish.
+  // Falls back to earliest report start → latest report end.
+  const allStepsFlat = sorted.flatMap((j) => j.report.steps ?? []);
+  let durationSeconds: number;
+  if (allStepsFlat.length > 0) {
+    const earliestStepMs = Math.min(...allStepsFlat.map((s) => new Date(s.started_at).getTime()));
+    const latestStepMs = Math.max(...allStepsFlat.map((s) => new Date(s.completed_at).getTime()));
+    durationSeconds = Math.round((latestStepMs - earliestStepMs) / 1000);
+  } else {
+    durationSeconds = Math.round(
+      (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
+    );
+  }
 
   // Merge timelines: concatenate in chronological order
   const cpuTimeline: number[] = [];

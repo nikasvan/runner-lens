@@ -348,22 +348,31 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
   const globalMin = Math.min(...dataRows.map((r) => r.startMs));
   const globalMax = Math.max(...dataRows.map((r) => r.endMs));
   const range = globalMax - globalMin || 1;
+  // Minimum bar width: 1.5% of total range so short/0s steps are visible
+  const minBarWidth = range * 0.015;
   const durLabelPad = range * 0.12;
 
   const labels = JSON.stringify(rows.map((r) => r.label));
-  const data = rows.map((r) => (r.isSep ? 'null' : `[${r.startMs},${r.endMs}]`)).join(',');
+  // Enforce minimum bar width for short/zero-duration steps
+  const data = rows.map((r) => {
+    if (r.isSep) return 'null';
+    const w = r.endMs - r.startMs;
+    const end = w < minBarWidth ? r.startMs + minBarWidth : r.endMs;
+    return `[${r.startMs},${end}]`;
+  }).join(',');
   const bgColors = JSON.stringify(rows.map((r) => r.color));
 
   const anns: string[] = [];
 
-  // Gray track behind each bar (subtle, no border)
+  // Gray track behind each bar — match bar height exactly
+  const trackHalf = 0.34;
   for (let i = 0; i < rows.length; i++) {
     if (!rows[i].isSep) {
-      anns.push(`tr${i}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin},xMax:${globalMax},yMin:${i - 0.35},yMax:${i + 0.35},backgroundColor:'#e8ecf0',borderWidth:0,borderRadius:6}`);
+      anns.push(`tr${i}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin},xMax:${globalMax},yMin:${i - trackHalf},yMax:${i + trackHalf},backgroundColor:'#eff2f5',borderWidth:0,borderRadius:5}`);
     }
   }
 
-  // Job group tinted left accent line (only for multi-job)
+  // Job group accent line on left (only multi-job)
   if (ganttJobs.length > 1) {
     for (const g of groups) {
       const c = GANTT_COLORS[g.ji % GANTT_COLORS.length];
@@ -381,7 +390,7 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
   /* eslint-disable no-useless-escape */
   return `{
 type:'bar',
-data:{labels:${labels},datasets:[{data:[${data}],backgroundColor:${bgColors},borderWidth:0,borderRadius:6,borderSkipped:false,barPercentage:0.62,categoryPercentage:1.0}]},
+data:{labels:${labels},datasets:[{data:[${data}],backgroundColor:${bgColors},borderWidth:0,borderRadius:5,borderSkipped:false,barPercentage:0.68,categoryPercentage:0.92}]},
 options:{
   indexAxis:'y',
   plugins:{

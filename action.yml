@@ -28,7 +28,7 @@ inputs:
   upload-artifact:
     description: 'Upload metrics report as a workflow artifact (true/false)'
     required: false
-    default: 'false'
+    default: 'true'
 
 outputs:
   cpu-avg:

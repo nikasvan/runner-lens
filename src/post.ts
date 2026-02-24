@@ -1,6 +1,8 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
+import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
 import { processMetrics } from './reporter';
@@ -172,6 +174,21 @@ async function run(): Promise<void> {
       await core.summary.addRaw(summaryHtml).write();
     } catch (e) {
       core.debug(`RunnerLens: job summary failed — ${e}`);
+    }
+
+    // ── Upload report artifact (opt-in) ────────────────
+    if (core.getInput('upload-artifact').toLowerCase() === 'true') {
+      try {
+        const jobName = process.env.GITHUB_JOB || 'job';
+        const artifactName = `runner-lens-${jobName}`;
+        const reportFile = path.join(DATA_DIR, 'report.json');
+        fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
+        const artifact = new DefaultArtifactClient();
+        await artifact.uploadArtifact(artifactName, [reportFile], DATA_DIR);
+        core.info(`RunnerLens: uploaded artifact "${artifactName}"`);
+      } catch (e) {
+        core.debug(`RunnerLens: artifact upload failed — ${e}`);
+      }
     }
 
   } catch (err) {

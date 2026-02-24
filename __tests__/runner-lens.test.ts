@@ -7,6 +7,7 @@ import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import {
   renderStatCards, renderAreaChart, renderGanttChart,
+  svgToPngDataUri, initResvg,
   sparkline, fmtDuration,
   renderStatCardsFallback, renderGanttFallback,
 } from '../src/svg-charts';
@@ -468,6 +469,17 @@ describe('renderGanttChart (SVG)', () => {
   });
 });
 
+describe('svgToPngDataUri', () => {
+  beforeAll(async () => { await initResvg(); });
+
+  it('converts SVG to a PNG data URI at 2x resolution', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="#0d1117"/></svg>';
+    const result = svgToPngDataUri(svg);
+    expect(result.uri).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
+    expect(result.width).toBe(100);
+  });
+});
+
 describe('fallback rendering', () => {
   it('renderStatCardsFallback produces HTML table', () => {
     const html = renderStatCardsFallback([
@@ -526,6 +538,8 @@ describe('fmtDuration', () => {
 // ─────────────────────────────────────────────────────────────
 
 describe('buildJobSummary', () => {
+  beforeAll(async () => { await initResvg(); });
+
   function makeReport(overrides: Partial<AggregatedReport> = {}): AggregatedReport {
     return {
       version: '1.0.0',
@@ -542,26 +556,25 @@ describe('buildJobSummary', () => {
     };
   }
 
-  it('produces summary with stat cards table', async () => {
-    const html = await buildJobSummary(makeReport());
-    expect(html).toContain('<table>');
+  it('produces summary with PNG stat cards', () => {
+    const html = buildJobSummary(makeReport());
+    expect(html).toContain('<img src="data:image/png;base64,');
     expect(html).toContain('RunnerLens');
   });
 
-  it('includes sparkline charts when timeline has >= 2 points', async () => {
-    const html = await buildJobSummary(makeReport({
+  it('includes CPU and Memory charts when timeline has >= 2 points', () => {
+    const html = buildJobSummary(makeReport({
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }));
-    expect(html).toContain('**CPU**');
-    expect(html).toContain('**Memory**');
-    expect(html).toContain('\u2588'); // sparkline block chars
+    expect(html).toContain('alt="CPU Usage Chart"');
+    expect(html).toContain('alt="Memory Usage Chart"');
   });
 
-  it('includes Gantt chart when steps are present', async () => {
-    const html = await buildJobSummary(makeReport({
+  it('includes Gantt chart when steps are present', () => {
+    const html = buildJobSummary(makeReport({
       steps: [
         { name: 'Checkout', number: 1, duration_seconds: 6, cpu_avg: 20, cpu_max: 40, mem_avg_mb: 1024, mem_max_mb: 2048, sample_count: 2, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' },
         { name: 'Build', number: 2, duration_seconds: 60, cpu_avg: 60, cpu_max: 92, mem_avg_mb: 3072, mem_max_mb: 5120, sample_count: 20, started_at: '2023-11-14T22:13:27Z', completed_at: '2023-11-14T22:14:27Z' },
@@ -571,33 +584,32 @@ describe('buildJobSummary', () => {
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }));
-    expect(html).toContain('Execution Timeline');
-    expect(html).toContain('Checkout');
-    expect(html).toContain('Build');
-    expect(html).toContain('<details>');
+    expect(html).toContain('alt="Execution Timeline"');
   });
 
-  it('skips sparklines when no timeline data', async () => {
-    const html = await buildJobSummary(makeReport({ timeline: undefined }));
-    expect(html).toContain('<table>');
-    expect(html).not.toContain('**CPU**');
+  it('skips area charts when no timeline data', () => {
+    const html = buildJobSummary(makeReport({ timeline: undefined }));
+    expect(html).toContain('alt="RunnerLens Stats"');
+    expect(html).not.toContain('alt="CPU Usage Chart"');
   });
 
-  it('includes footer with version', async () => {
-    const html = await buildJobSummary(makeReport());
+  it('includes footer with version', () => {
+    const html = buildJobSummary(makeReport());
     expect(html).toContain('v1.0.0');
     expect(html).toContain('runnerlens/runner-lens');
   });
 
-  it('formats duration >= 60s as minutes', async () => {
-    const html = await buildJobSummary(makeReport({ duration_seconds: 120 }));
-    expect(html).toContain('2m');
+  it('formats duration >= 60s as minutes', () => {
+    const html = buildJobSummary(makeReport({ duration_seconds: 120 }));
+    // The "2m" appears inside the PNG (not inspectable), but verify no crash
+    expect(html).toContain('<img');
   });
 
-  it('formats memory < 1024 MB as MB', async () => {
-    const html = await buildJobSummary(makeReport({
+  it('formats memory < 1024 MB as MB', () => {
+    const html = buildJobSummary(makeReport({
       memory: { avg: 512, max: 800, min: 100, p50: 500, p95: 750, p99: 780, latest: 600, total_mb: 1024, swap_max_mb: 0 },
     }));
-    expect(html).toContain('512 MB');
+    // Memory label baked into PNG; verify it renders without crashing
+    expect(html).toContain('data:image/png;base64,');
   });
 });

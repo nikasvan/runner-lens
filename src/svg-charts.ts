@@ -1,16 +1,10 @@
 // ─────────────────────────────────────────────────────────────
 // RunnerLens — Dark-Themed SVG Chart Rendering
 //
-// Strategy: Render charts as SVG, convert to PNG via rsvg-convert
-// (pre-installed on GitHub Ubuntu runners), embed as
-// data:image/png;base64 which GitHub allows. Falls back to
-// HTML/markdown when rsvg-convert is unavailable.
+// Strategy: Render charts as SVG, convert to PNG via @resvg/resvg-js
+// (pure npm, no system deps), embed as data:image/png;base64
+// which GitHub allows in Job Summaries.
 // ─────────────────────────────────────────────────────────────
-
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { exec } from '@actions/exec';
 
 // ── Theme ────────────────────────────────────────────────────
 
@@ -54,49 +48,84 @@ function fmtTime(iso: string): string {
   return `${h}:${m}`;
 }
 
-// ── SVG → PNG conversion ────────────────────────────────────
+// ── SVG → PNG conversion (via @resvg/resvg-wasm) ────────────
 
-let _hasRsvg: boolean | null = null;
+import * as fs from 'fs';
+import * as path from 'path';
 
-async function hasRsvgConvert(): Promise<boolean> {
-  if (_hasRsvg !== null) return _hasRsvg;
-  try {
-    await exec('rsvg-convert', ['--version'], { silent: true });
-    _hasRsvg = true;
-  } catch {
-    _hasRsvg = false;
-  }
-  return _hasRsvg;
+let _wasmReady = false;
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const resvgWasm = require('@resvg/resvg-wasm') as typeof import('@resvg/resvg-wasm');
+
+// Font buffers loaded during init, reused for every render.
+let _fontBuffers: Uint8Array[] = [];
+
+// Monospace font search paths (GitHub runners + macOS dev)
+const FONT_CANDIDATES = [
+  // Ubuntu / GitHub runners
+  '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf',
+  // macOS
+  '/System/Library/Fonts/SFNSMono.ttf',
+  '/System/Library/Fonts/Menlo.ttc',
+  '/System/Library/Fonts/Courier.ttc',
+];
+
+/**
+ * Initialize the resvg WASM module. Must be called once before
+ * svgToPngDataUri(). Safe to call multiple times (no-ops after first).
+ */
+export async function initResvg(): Promise<void> {
+  if (_wasmReady) return;
+  // In the bundled action, the WASM lives at dist/post/node_modules/@resvg/resvg-wasm/
+  // In dev/test, it lives at the project-root node_modules/@resvg/resvg-wasm/
+  const candidates = [
+    path.join(__dirname, 'node_modules', '@resvg', 'resvg-wasm', 'index_bg.wasm'),
+    path.resolve(__dirname, '..', 'node_modules', '@resvg', 'resvg-wasm', 'index_bg.wasm'),
+  ];
+  const wasmPath = candidates.find((p) => fs.existsSync(p));
+  if (!wasmPath) throw new Error('resvg WASM binary not found');
+  const wasmBuf = fs.readFileSync(wasmPath);
+  await resvgWasm.initWasm(wasmBuf.buffer);
+
+  // Load available system fonts for text rendering
+  _fontBuffers = FONT_CANDIDATES
+    .filter((p) => fs.existsSync(p))
+    .map((p) => new Uint8Array(fs.readFileSync(p)));
+
+  _wasmReady = true;
 }
 
 /**
- * Convert an SVG string to a PNG data URI via rsvg-convert.
- * Returns null if rsvg-convert is not available.
+ * Convert an SVG string to a PNG data URI, rendered at 2x for crisp
+ * output on Retina / HiDPI displays. Returns the data URI and the
+ * original (1x) display width for the <img> tag.
  */
-export async function svgToPngDataUri(svg: string): Promise<string | null> {
-  if (!(await hasRsvgConvert())) return null;
-
-  const tmp = path.join(os.tmpdir(), `runnerlens-${Date.now()}`);
-  const svgFile = `${tmp}.svg`;
-  const pngFile = `${tmp}.png`;
-  try {
-    fs.writeFileSync(svgFile, svg);
-    await exec('rsvg-convert', [svgFile, '-o', pngFile, '-b', BG], {
-      silent: true,
-    });
-    const png = fs.readFileSync(pngFile);
-    return `data:image/png;base64,${png.toString('base64')}`;
-  } catch {
-    return null;
-  } finally {
-    try { fs.unlinkSync(svgFile); } catch { /* ok */ }
-    try { fs.unlinkSync(pngFile); } catch { /* ok */ }
-  }
+export function svgToPngDataUri(svg: string): { uri: string; width: number } {
+  const scale = 2;
+  const resvg = new resvgWasm.Resvg(svg, {
+    background: BG,
+    font: {
+      fontBuffers: _fontBuffers,
+      defaultFontFamily: 'DejaVu Sans Mono',
+    },
+    fitTo: { mode: 'zoom', value: scale },
+  });
+  const rendered = resvg.render();
+  const png = rendered.asPng();
+  return {
+    uri: `data:image/png;base64,${Buffer.from(png).toString('base64')}`,
+    width: Math.round(rendered.width / scale),
+  };
 }
 
-/** Wrap a data URI in an <img> tag. */
-export function imgTag(dataUri: string, alt: string): string {
-  return `<img src="${dataUri}" alt="${esc(alt)}">`;
+/** Wrap a data URI in an <img> tag with explicit display width. */
+export function imgTag(dataUri: string, alt: string, width?: number): string {
+  const w = width ? ` width="${width}"` : '';
+  return `<img src="${dataUri}" alt="${esc(alt)}"${w}>`;
 }
 
 // ── Monotone Cubic Hermite Interpolation (Fritsch-Carlson) ──

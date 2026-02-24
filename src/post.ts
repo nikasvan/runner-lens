@@ -8,6 +8,7 @@ import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
 import { runSummary } from './summary';
 import { buildJobSummary } from './job-summary';
+import { initResvg } from './svg-charts';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
 } from './constants';
@@ -168,7 +169,8 @@ async function run(): Promise<void> {
 
     // ── Job Summary (best-effort) ───────────────────────
     try {
-      const summaryHtml = await buildJobSummary(report);
+      await initResvg();
+      const summaryHtml = buildJobSummary(report);
       await core.summary.addRaw(summaryHtml).write();
     } catch (e) {
       core.debug(`RunnerLens: job summary failed — ${e}`);

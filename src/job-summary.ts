@@ -219,8 +219,7 @@ function timeLabels(startedAt: string, endedAt: string, count: number): string[]
 const STEP_LINE_COLOR = '#d0d7de';
 const STEP_BAND_COLORS = ['rgba(0,0,0,0.04)', 'rgba(0,0,0,0)'];
 
-interface StepRegion { name: string; startX: number; endX: number }
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 function buildChartConfig(
   title: string,
   values: number[],
@@ -228,61 +227,7 @@ function buildChartConfig(
   lineColor: string,
   fillColor: string,
   yAxisLabel: string,
-  stepRegions?: StepRegion[],
 ): Record<string, any> {
-  const annotations: Record<string, any> = {};
-  let suggestedMax: number | undefined;
-
-  if (stepRegions && stepRegions.length > 0) {
-    const dataMax = values.length > 0 ? Math.max(...values) : 100;
-    suggestedMax = dataMax * 1.25;
-    const labelY = dataMax * 1.1;
-
-    for (let i = 0; i < stepRegions.length; i++) {
-      const m = stepRegions[i];
-      const truncName = m.name.length > 16 ? m.name.slice(0, 13) + '...' : m.name;
-      const bandWidth = m.endX - m.startX;
-
-      // Alternating background band
-      if (bandWidth >= 0.2) {
-        annotations[`sb${i}`] = {
-          type: 'box',
-          xMin: m.startX,
-          xMax: m.endX,
-          backgroundColor: STEP_BAND_COLORS[i % 2],
-          borderWidth: 0,
-          drawTime: 'beforeDatasetsDraw',
-        };
-      }
-
-      // Vertical line at step start (skip at x=0, it overlaps the y-axis)
-      if (m.startX > 0.2) {
-        annotations[`sl${i}`] = {
-          type: 'line',
-          xMin: m.startX,
-          xMax: m.startX,
-          borderColor: STEP_LINE_COLOR,
-          borderWidth: 1,
-          borderDash: [4, 4],
-        };
-      }
-
-      // Step name label centered in band
-      const midX = bandWidth >= 0.2 ? (m.startX + m.endX) / 2 : m.startX + 0.3;
-      annotations[`sn${i}`] = {
-        type: 'label',
-        xValue: midX,
-        yValue: labelY,
-        content: [truncName],
-        color: TICK,
-        font: { size: 8 },
-        rotation: -90,
-        padding: 2,
-      };
-    }
-  }
-
-  const hasAnnotations = Object.keys(annotations).length > 0;
   return {
     type: 'line',
     data: {
@@ -308,7 +253,6 @@ function buildChartConfig(
           font: { size: 14, weight: 'bold' },
           padding: { bottom: 12 },
         },
-        ...(hasAnnotations ? { annotation: { annotations } } : {}),
       },
       scales: {
         x: {
@@ -318,7 +262,6 @@ function buildChartConfig(
         },
         y: {
           beginAtZero: true,
-          ...(suggestedMax !== undefined ? { suggestedMax } : {}),
           ticks: { color: TICK, font: { size: 11 } },
           grid: { color: '#eff2f5' },
           border: { display: false },
@@ -329,11 +272,81 @@ function buildChartConfig(
     },
   };
 }
+
+/**
+ * Build a time-axis line chart as a raw JS string config (supports tick
+ * callbacks). Uses the same pattern as buildGanttChartString.
+ */
+function buildSteppedChartString(
+  title: string,
+  dataPoints: { x: number; y: number }[],
+  lineColor: string,
+  fillColor: string,
+  yAxisLabel: string,
+  xMin: number,
+  xMax: number,
+  steps: { name: string; startMs: number; endMs: number }[],
+): string {
+  const data = JSON.stringify(dataPoints);
+  const yValues = dataPoints.map(p => p.y);
+  const dataMax = yValues.length > 0 ? Math.max(...yValues) : 100;
+  const suggestedMax = dataMax * 1.25;
+  const labelY = dataMax * 1.1;
+  const xRange = xMax - xMin;
+
+  const anns: string[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const m = steps[i];
+    const name = m.name.replace(/'/g, "\\'");
+    const truncName = name.length > 16 ? name.slice(0, 13) + '...' : name;
+
+    // Alternating background band
+    anns.push(`sb${i}:{type:'box',xMin:${m.startMs},xMax:${m.endMs},backgroundColor:'${STEP_BAND_COLORS[i % 2]}',borderWidth:0,drawTime:'beforeDatasetsDraw'}`);
+
+    // Vertical line at step start
+    anns.push(`sl${i}:{type:'line',xMin:${m.startMs},xMax:${m.startMs},borderColor:'${STEP_LINE_COLOR}',borderWidth:1,borderDash:[4,4]}`);
+
+    // Step name label centered in band
+    const midMs = (m.startMs + m.endMs) / 2;
+    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${labelY},content:['${truncName}'],color:'${TICK}',font:{size:8},rotation:-90,padding:2}`);
+  }
+
+  /* eslint-disable no-useless-escape */
+  return `{
+type:'line',
+data:{datasets:[{label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2}]},
+options:{
+  plugins:{
+    legend:{display:false},
+    title:{display:true,text:'${title.replace(/'/g, "\\'")}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
+    annotation:{annotations:{${anns.join(',')}}}
+  },
+  scales:{
+    x:{
+      type:'linear',min:${xMin - xRange * 0.01},max:${xMax + xRange * 0.01},
+      ticks:{color:'${TICK}',font:{size:11},maxRotation:0,autoSkipPadding:20,
+        callback:function(val){if(val<${xMin}||val>${xMax})return '';var d=new Date(val);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+':'+d.getUTCSeconds().toString().padStart(2,'0')}
+      },
+      grid:{display:false},
+      border:{display:false}
+    },
+    y:{
+      beginAtZero:true,suggestedMax:${suggestedMax},
+      ticks:{color:'${TICK}',font:{size:11}},
+      grid:{color:'#eff2f5'},
+      border:{display:false},
+      title:{display:true,text:'${yAxisLabel}',color:'${TICK}',font:{size:12}}
+    }
+  },
+  layout:{padding:{top:4,right:16,bottom:4,left:4}}
+}}`;
+  /* eslint-enable no-useless-escape */
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 const QUICKCHART_URL_LIMIT = 1800;
 
-function buildChartUrl(config: Record<string, any>): string {
+function buildChartUrl(config: Record<string, unknown>): string {
   const json = JSON.stringify(config);
   const encoded = encodeURIComponent(json);
   const bkg = encodeURIComponent(CHART_BG);
@@ -352,41 +365,64 @@ async function buildQuickChart(
 ): Promise<string> {
   const maxPts = 30;
   const data = downsample(values, maxPts);
-  const labels = timeLabels(startedAt, endedAt, data.length);
+  const chartStartMs = new Date(startedAt).getTime();
+  const chartEndMs = new Date(endedAt).getTime();
 
-  let stepRegions: StepRegion[] | undefined;
+  // ── Steps present: use linear time axis so ALL steps are visible ──
   if (steps && steps.length > 0) {
-    const startMs = new Date(startedAt).getTime();
-    const endMs = new Date(endedAt).getTime();
-    const range = endMs - startMs;
-    if (range > 0) {
-      const maxIdx = data.length - 1;
-      stepRegions = steps
-        .filter(s => s.started_at && s.completed_at)
-        .map(s => {
-          const sMs = new Date(s.started_at).getTime();
-          const eMs = new Date(s.completed_at).getTime();
-          return {
-            name: s.name,
-            startX: Math.max(0, Math.min(maxIdx, ((sMs - startMs) / range) * maxIdx)),
-            endX: Math.max(0, Math.min(maxIdx, ((eMs - startMs) / range) * maxIdx)),
-          };
-        })
-        // Keep steps that overlap the chart range (band has width, or point within range)
-        .filter(m => m.endX > m.startX + 0.1 || (m.startX > 0 && m.startX < maxIdx));
+    const dataPoints = data.map((v, i) => ({
+      x: chartStartMs + (chartEndMs - chartStartMs) * i / Math.max(data.length - 1, 1),
+      y: v,
+    }));
+
+    let xMin = chartStartMs;
+    let xMax = chartEndMs;
+    const totalRange = chartEndMs - chartStartMs;
+    const minStepMs = totalRange * 0.015;
+
+    const stepRegions = steps
+      .filter(s => s.started_at && s.completed_at)
+      .map(s => {
+        const sMs = new Date(s.started_at).getTime();
+        const eMs = new Date(s.completed_at).getTime();
+        return {
+          name: s.name,
+          startMs: sMs,
+          endMs: eMs <= sMs ? sMs + minStepMs : eMs,
+        };
+      });
+
+    for (const r of stepRegions) {
+      xMin = Math.min(xMin, r.startMs);
+      xMax = Math.max(xMax, r.endMs);
     }
+
+    const chartStr = buildSteppedChartString(
+      title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, stepRegions,
+    );
+    const body = JSON.stringify({
+      version: CHART_VERSION,
+      backgroundColor: CHART_BG,
+      width: 760,
+      height: 300,
+      devicePixelRatio: 2,
+      format: 'png',
+      chart: chartStr,
+    });
+    const url = await postQuickChart(body);
+    return `<img src="${url}" alt="${esc(title)}" width="760">`;
   }
 
-  const hasSteps = stepRegions && stepRegions.length > 0;
-  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel, stepRegions);
-  const chartHeight = hasSteps ? 300 : 250;
+  // ── No steps: use category axis (supports compact GET URLs) ──
+  const labels = timeLabels(startedAt, endedAt, data.length);
+  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel);
   let url = buildChartUrl(config);
   if (url.length > QUICKCHART_URL_LIMIT) {
     const body = JSON.stringify({
       version: CHART_VERSION,
       backgroundColor: CHART_BG,
       width: 760,
-      height: chartHeight,
+      height: 250,
       devicePixelRatio: 2,
       format: 'png',
       chart: config,
@@ -397,7 +433,6 @@ async function buildQuickChart(
       // If POST fails, use long GET URL anyway
     }
   }
-
   return `<img src="${url}" alt="${esc(title)}" width="760">`;
 }
 

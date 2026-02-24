@@ -694,6 +694,12 @@ describe('fingerprint', () => {
     expect(fingerprint(sys1)).toBe(fingerprint(sys2));
   });
 
+  it('groups runners with whitespace differences in cpu_model', () => {
+    const sys1 = { ...makeSysInfo(), cpu_model: 'AMD EPYC' };
+    const sys2 = { ...makeSysInfo(), cpu_model: '  AMD  EPYC  ' };
+    expect(fingerprint(sys1)).toBe(fingerprint(sys2));
+  });
+
   it('produces different fingerprints for different hardware', () => {
     const sys1 = makeSysInfo();
     const sys2 = { ...makeSysInfo(), cpu_count: 4, total_memory_mb: 16384 };

@@ -22,7 +22,8 @@ import { REPORT_VERSION } from './constants';
 // ─────────────────────────────────────────────────────────────
 
 export function fingerprint(sys: SystemInfo): string {
-  return `${sys.cpu_count}|${sys.cpu_model}|${sys.total_memory_mb}|${sys.runner_os}|${sys.runner_arch}`;
+  const cpuNorm = sys.cpu_model.trim().replace(/\s+/g, ' ');
+  return `${sys.cpu_count}|${cpuNorm}|${sys.total_memory_mb}|${sys.runner_os}|${sys.runner_arch}`;
 }
 
 export function mergeReports(jobReports: JobReport[]): AggregatedReport {

@@ -25,6 +25,10 @@ inputs:
     description: 'Maximum metrics file size in MB before rotation (0 = unlimited)'
     required: false
     default: '100'
+  upload-artifact:
+    description: 'Upload metrics report as a workflow artifact (true/false)'
+    required: false
+    default: 'false'
 
 outputs:
   cpu-avg:

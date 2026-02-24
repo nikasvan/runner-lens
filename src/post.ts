@@ -197,7 +197,6 @@ async function run(): Promise<void> {
     // ── Outputs ───────────────────────────────────────────
     core.setOutput('cpu-avg', report.cpu.avg.toFixed(1));
     core.setOutput('cpu-max', report.cpu.max.toFixed(1));
-    core.setOutput('cpu-p95', report.cpu.p95.toFixed(1));
     core.setOutput('mem-avg-mb', report.memory.avg.toFixed(0));
     core.setOutput('mem-max-mb', report.memory.max.toFixed(0));
     core.setOutput('mem-avg-pct',

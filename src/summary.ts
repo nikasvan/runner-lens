@@ -37,13 +37,13 @@ export function mergeReports(jobReports: JobReport[]): AggregatedReport {
 
   const first = sorted[0].report;
 
-  // Duration: earliest started_at → latest ended_at
+  // Time range: earliest started_at → latest ended_at
   const startedAt = first.started_at;
   const allEndTimes = sorted.map((j) => new Date(j.report.ended_at).getTime());
   const endedAt = new Date(Math.max(...allEndTimes)).toISOString();
-  const durationSeconds = Math.round(
-    (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
-  );
+
+  // Duration: max of any individual job (jobs run in parallel)
+  const durationSeconds = Math.max(...sorted.map((j) => j.report.duration_seconds));
 
   // Merge timelines: concatenate in chronological order
   const cpuTimeline: number[] = [];

@@ -29,6 +29,21 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function shortOsName(release: string): string {
+  // "Ubuntu 22.04.3 LTS" → "Ubuntu 22.04"
+  const m = release.match(/^(\S+)\s+([\d]+\.[\d]+)/);
+  if (m) return `${m[1]} ${m[2]}`;
+  return release.length > 18 ? release.slice(0, 15) + '...' : release;
+}
+
+function shortCpuModel(model: string): string {
+  // "AMD EPYC 7763 64-Core Processor" → "AMD EPYC 7763"
+  return model
+    .replace(/\s*\d+-Core Processor$/i, '')
+    .replace(/\s*with\s+.*$/i, '')
+    .replace(/\s+@\s+[\d.]+GHz$/i, '');
+}
+
 // ── QuickChart HTTP helper ───────────────────────────────────
 
 function postQuickChart(body: string): Promise<string> {
@@ -66,10 +81,16 @@ function postQuickChart(body: string): Promise<string> {
 // ── Stat Cards (rendered as image via chartjs-plugin-annotation) ──
 
 function buildStatCardsConfig(report: AggregatedReport): Record<string, any> {
+  const runnerValue = report.system.os_release !== 'unknown'
+    ? shortOsName(report.system.os_release)
+    : `${report.system.runner_os} (${report.system.runner_arch})`;
+  const cpuModel = shortCpuModel(report.system.cpu_model);
+  const runnerSub = `${cpuModel} \u00b7 ${report.system.cpu_count} vCPU \u00b7 ${fmtMem(report.system.total_memory_mb)}`;
+
   const cards = [
-    { accent: '#3fb950', label: 'RUNNER', value: `${report.system.runner_os} (${report.system.runner_arch})`, sub: `${report.system.cpu_count} vCPU \u00b7 ${fmtMem(report.system.total_memory_mb)}` },
+    { accent: '#3fb950', label: 'RUNNER', value: runnerValue, sub: runnerSub },
     { accent: '#58a6ff', label: 'DURATION', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples` },
-    { accent: '#f0883e', label: 'CPU', value: `avg ${report.cpu.avg.toFixed(1)}%`, sub: `p95 ${report.cpu.p95.toFixed(1)}% \u00b7 peak ${report.cpu.max.toFixed(1)}%` },
+    { accent: '#f0883e', label: 'CPU', value: `avg ${report.cpu.avg.toFixed(1)}%`, sub: `peak ${report.cpu.max.toFixed(1)}%` },
     { accent: '#bc8cff', label: 'MEMORY', value: `avg ${fmtMem(report.memory.avg)}`, sub: `peak ${fmtMem(report.memory.max)} / ${fmtMem(report.memory.total_mb)}` },
   ];
 
@@ -142,17 +163,20 @@ async function buildStatCardsImage(report: AggregatedReport): Promise<string> {
 
 /** Markdown fallback if image rendering fails */
 function buildStatCardsFallback(report: AggregatedReport): string {
-  const runner = `${report.system.runner_os} (${report.system.runner_arch})`;
-  const specs = `${report.system.cpu_count} vCPU \u00b7 ${fmtMem(report.system.total_memory_mb)}`;
+  const runnerValue = report.system.os_release !== 'unknown'
+    ? shortOsName(report.system.os_release)
+    : `${report.system.runner_os} (${report.system.runner_arch})`;
+  const cpuModel = shortCpuModel(report.system.cpu_model);
+  const specs = `${cpuModel} \u00b7 ${report.system.cpu_count} vCPU \u00b7 ${fmtMem(report.system.total_memory_mb)}`;
   const dur = fmtDuration(report.duration_seconds);
 
   return [
-    `> **${runner}** \u00b7 ${specs} \u00b7 **${dur}** \u00b7 ${report.sample_count} samples`,
+    `> **${runnerValue}** \u00b7 ${specs} \u00b7 **${dur}** \u00b7 ${report.sample_count} samples`,
     '',
-    '| Metric | Average | P95 | Peak |',
-    '|:--|--:|--:|--:|',
-    `| **CPU** | ${report.cpu.avg.toFixed(1)}% | ${report.cpu.p95.toFixed(1)}% | ${report.cpu.max.toFixed(1)}% |`,
-    `| **Memory** | ${fmtMem(report.memory.avg)} | ${fmtMem(report.memory.p95)} | ${fmtMem(report.memory.max)} / ${fmtMem(report.memory.total_mb)} |`,
+    '| Metric | Average | Peak |',
+    '|:--|--:|--:|',
+    `| **CPU** | ${report.cpu.avg.toFixed(1)}% | ${report.cpu.max.toFixed(1)}% |`,
+    `| **Memory** | ${fmtMem(report.memory.avg)} | ${fmtMem(report.memory.max)} / ${fmtMem(report.memory.total_mb)} |`,
   ].join('\n');
 }
 
@@ -262,7 +286,7 @@ function buildChartString(
 
   for (let i = 0; i < jobSpans.length; i++) {
     const span = jobSpans[i];
-    const name = span.jobName.length > 14 ? span.jobName.slice(0, 12) + '..' : span.jobName;
+    const name = span.jobName.length > 14 ? span.jobName.slice(0, 11) + '...' : span.jobName;
     const midIdx = ((span.startFrac + span.endFrac) / 2 * n).toFixed(2);
 
     // Dashed separator line between jobs (skip before the first job)
@@ -365,13 +389,16 @@ async function buildMultiJobQuickChart(
   title: string,
   jobTimelines: JobTimeline[],
   yLabel: string,
-  globalStartedAt: string,
-  globalEndedAt: string,
+  _globalStartedAt: string,
+  _globalEndedAt: string,
 ): Promise<string> {
+  // Compute tight bounds from actual job data to avoid empty space
+  const globalStartMs = Math.min(...jobTimelines.map(jt => new Date(jt.startedAt).getTime()));
+  const globalEndMs = Math.max(...jobTimelines.map(jt => new Date(jt.endedAt).getTime()));
+  const tightStart = new Date(globalStartMs).toISOString();
+  const tightEnd = new Date(globalEndMs).toISOString();
   const maxPts = 30;
-  const labels = timeLabels(globalStartedAt, globalEndedAt, maxPts);
-  const globalStartMs = new Date(globalStartedAt).getTime();
-  const globalEndMs = new Date(globalEndedAt).getTime();
+  const labels = timeLabels(tightStart, tightEnd, maxPts);
 
   const chartStr = buildMultiJobChartString(title, jobTimelines, labels, yLabel, globalStartMs, globalEndMs);
   const body = JSON.stringify({
@@ -490,7 +517,7 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
   for (let ji = 0; ji < ganttJobs.length; ji++) {
     const c = GANTT_COLORS[ji % GANTT_COLORS.length];
     for (const step of ganttJobs[ji].steps) {
-      const name = step.name.length > 28 ? step.name.slice(0, 26) + '..' : step.name;
+      const name = step.name.length > 28 ? step.name.slice(0, 25) + '...' : step.name;
       const sMs = new Date(step.started_at).getTime();
       const eMs = new Date(step.completed_at).getTime();
       stepRows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, jobIdx: ji });
@@ -505,12 +532,12 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
     const c = GANTT_COLORS[ji % GANTT_COLORS.length];
 
     if (multiJob) {
-      const jn = ganttJobs[ji].jobName.length > 20 ? ganttJobs[ji].jobName.slice(0, 18) + '..' : ganttJobs[ji].jobName;
+      const jn = ganttJobs[ji].jobName.length > 20 ? ganttJobs[ji].jobName.slice(0, 17) + '...' : ganttJobs[ji].jobName;
       rows.push({ label: jn.toUpperCase(), startMs: globalMin, endMs: globalMin, durStr: '', color: 'transparent', jobIdx: ji, isHeader: true });
     }
 
     for (const step of ganttJobs[ji].steps) {
-      const name = step.name.length > 28 ? step.name.slice(0, 26) + '..' : step.name;
+      const name = step.name.length > 28 ? step.name.slice(0, 25) + '...' : step.name;
       const sMs = new Date(step.started_at).getTime();
       const eMs = new Date(step.completed_at).getTime();
       rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, jobIdx: ji, isHeader: false });
@@ -638,6 +665,11 @@ function buildGanttFallback(ganttJobs: GanttJob[]): string {
 
 export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport[]): Promise<string> {
   const parts: string[] = [];
+  const isMultiJob = jobs && jobs.length > 1;
+
+  if (isMultiJob) {
+    parts.push('<h2>Workflow Summary</h2>');
+  }
 
   // Stat cards (image with fallback to markdown)
   try {

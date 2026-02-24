@@ -35,8 +35,6 @@ outputs:
     description: 'Average CPU usage %'
   cpu-max:
     description: 'Peak CPU usage %'
-  cpu-p95:
-    description: '95th-percentile CPU usage %'
   mem-avg-mb:
     description: 'Average memory usage (MB)'
   mem-max-mb:

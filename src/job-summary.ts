@@ -229,26 +229,30 @@ function buildChartConfig(
 ): Record<string, any> {
   const annotations: Record<string, any> = {};
   if (stepMarkers && stepMarkers.length > 0) {
+    const dataMax = values.length > 0 ? Math.max(...values) : 100;
     for (let i = 0; i < stepMarkers.length; i++) {
       const m = stepMarkers[i];
       const truncName = m.name.length > 20 ? m.name.slice(0, 17) + '...' : m.name;
-      annotations[`step${i}`] = {
+      // Vertical dashed line at step boundary
+      annotations[`sl${i}`] = {
         type: 'line',
         xMin: m.xPos,
         xMax: m.xPos,
         borderColor: STEP_LINE_COLOR,
         borderWidth: 1,
         borderDash: [4, 4],
-        label: {
-          display: true,
-          content: truncName,
-          position: 'start',
-          rotation: -90,
-          backgroundColor: 'rgba(255,255,255,0.85)',
-          color: TICK,
-          font: { size: 9 },
-          padding: 3,
-        },
+      };
+      // Step name label (separate annotation — proven to render on QuickChart)
+      annotations[`sn${i}`] = {
+        type: 'label',
+        xValue: m.xPos,
+        yValue: dataMax * 0.92,
+        content: [truncName],
+        color: TICK,
+        font: { size: 9 },
+        rotation: -90,
+        backgroundColor: 'rgba(255,255,255,0.85)',
+        padding: 3,
       };
     }
   }

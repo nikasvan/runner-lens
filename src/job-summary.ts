@@ -482,86 +482,97 @@ function collectGanttJobs(report: AggregatedReport, jobs?: JobReport[]): GanttJo
 function buildGanttChartString(ganttJobs: GanttJob[]): string {
   const multiJob = ganttJobs.length > 1;
 
-  // Track which rows belong to which job (for group annotations)
-  interface Row { label: string; startMs: number; endMs: number; durStr: string; color: string; tickColor: string; jobIdx: number }
+  interface Row { label: string; startMs: number; endMs: number; durStr: string; color: string; jobIdx: number; isHeader: boolean }
   const rows: Row[] = [];
-  const jobRanges: { jobName: string; color: string; startRow: number; endRow: number }[] = [];
 
+  // First pass: collect step rows to compute globalMin/globalMax
+  const stepRows: { label: string; startMs: number; endMs: number; durStr: string; color: string; jobIdx: number }[] = [];
   for (let ji = 0; ji < ganttJobs.length; ji++) {
     const c = GANTT_COLORS[ji % GANTT_COLORS.length];
-    const startRow = rows.length;
     for (const step of ganttJobs[ji].steps) {
       const name = step.name.length > 28 ? step.name.slice(0, 26) + '..' : step.name;
       const sMs = new Date(step.started_at).getTime();
       const eMs = new Date(step.completed_at).getTime();
-      rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, tickColor: multiJob ? c.bg : TITLE_COLOR, jobIdx: ji });
+      stepRows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, jobIdx: ji });
     }
-    jobRanges.push({ jobName: ganttJobs[ji].jobName, color: c.bg, startRow, endRow: rows.length - 1 });
   }
 
-  const globalMin = Math.min(...rows.map((r) => r.startMs));
-  const globalMax = Math.max(...rows.map((r) => r.endMs));
+  const globalMin = Math.min(...stepRows.map((r) => r.startMs));
+  const globalMax = Math.max(...stepRows.map((r) => r.endMs));
+
+  // Second pass: build rows with header rows for multi-job
+  for (let ji = 0; ji < ganttJobs.length; ji++) {
+    const c = GANTT_COLORS[ji % GANTT_COLORS.length];
+
+    if (multiJob) {
+      const jn = ganttJobs[ji].jobName.length > 20 ? ganttJobs[ji].jobName.slice(0, 18) + '..' : ganttJobs[ji].jobName;
+      rows.push({ label: jn.toUpperCase(), startMs: globalMin, endMs: globalMin, durStr: '', color: 'transparent', jobIdx: ji, isHeader: true });
+    }
+
+    for (const step of ganttJobs[ji].steps) {
+      const name = step.name.length > 28 ? step.name.slice(0, 26) + '..' : step.name;
+      const sMs = new Date(step.started_at).getTime();
+      const eMs = new Date(step.completed_at).getTime();
+      rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, jobIdx: ji, isHeader: false });
+    }
+  }
+
   const range = globalMax - globalMin || 1;
   const minBarWidth = range * 0.015;
-  const durLabelPad = range * 0.12;
+  const durLabelPad = range * 0.10;
 
   const labels = JSON.stringify(rows.map((r) => r.label));
   const data = rows.map((r) => {
+    if (r.isHeader) return `[${globalMin},${globalMin}]`;
     const w = r.endMs - r.startMs;
     const end = w < minBarWidth ? r.startMs + minBarWidth : r.endMs;
     return `[${r.startMs},${end}]`;
   }).join(',');
-  const bgColors = JSON.stringify(rows.map((r) => r.color));
+  const bgColors = JSON.stringify(rows.map((r) => r.isHeader ? 'transparent' : r.color));
 
   const anns: string[] = [];
 
-  // Gray track behind each bar
-  const trackHalf = 0.32;
+  // Track backgrounds — flush, no gaps
   for (let i = 0; i < rows.length; i++) {
-    anns.push(`tr${i}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin},xMax:${globalMax},yMin:${i - trackHalf},yMax:${i + trackHalf},backgroundColor:'#eff2f5',borderWidth:0,borderRadius:5}`);
-  }
-
-  // Duration labels on right
-  for (let i = 0; i < rows.length; i++) {
-    anns.push(`du${i}:{type:'label',drawTime:'afterDatasetsDraw',xValue:${globalMax + durLabelPad * 0.5},yValue:${i},content:['${rows[i].durStr}'],color:'${TICK}',font:{size:11}}`);
-  }
-
-  if (multiJob) {
-    for (let g = 0; g < jobRanges.length; g++) {
-      const jr = jobRanges[g];
-
-      // Thin colored accent strip on the left edge for each job group
-      anns.push(`ga${g}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin - range * 0.012},xMax:${globalMin - range * 0.004},yMin:${jr.startRow - 0.42},yMax:${jr.endRow + 0.42},backgroundColor:'${jr.color}',borderWidth:0,borderRadius:2}`);
-
-      // Job name label positioned at the top-left of the group
-      const jn = jr.jobName.length > 14 ? jr.jobName.slice(0, 12) + '..' : jr.jobName;
-      anns.push(`gl${g}:{type:'label',drawTime:'afterDatasetsDraw',xValue:${globalMin},yValue:${jr.startRow},xAdjust:0,yAdjust:-16,content:['${jn}'],color:'${jr.color}',font:{size:10,weight:'bold'},textAlign:'left'}`);
-
-      // Thin divider line between job groups
-      if (g > 0) {
-        const midY = (jobRanges[g - 1].endRow + jr.startRow) / 2;
-        anns.push(`gd${g}:{type:'line',drawTime:'beforeDatasetsDraw',yMin:${midY},yMax:${midY},xMin:${globalMin},xMax:${globalMax},borderColor:'#d0d7de',borderWidth:1,borderDash:[4,3]}`);
-      }
+    const row = rows[i];
+    if (row.isHeader) {
+      // Header row: colored background matching job color (light)
+      const hex = GANTT_COLORS[row.jobIdx % GANTT_COLORS.length].bg;
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      anns.push(`tr${i}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin},xMax:${globalMax},yMin:${i - 0.5},yMax:${i + 0.5},backgroundColor:'rgba(${r},${g},${b},0.10)',borderWidth:0}`);
+    } else {
+      anns.push(`tr${i}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin},xMax:${globalMax},yMin:${i - 0.5},yMax:${i + 0.5},backgroundColor:'${i % 2 === 0 ? '#f6f8fa' : '#eff2f5'}',borderWidth:0}`);
     }
   }
 
-  // Scriptable y-axis tick colors
-  const tickColors = JSON.stringify(rows.map((r) => r.tickColor));
+  // Duration labels on right (skip header rows)
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].isHeader) continue;
+    anns.push(`du${i}:{type:'label',drawTime:'afterDatasetsDraw',xValue:${globalMax + durLabelPad * 0.5},yValue:${i},content:['${rows[i].durStr}'],color:'${TICK}',font:{size:10}}`);
+  }
+
+  // Y-axis tick colors: header rows get job color, step rows get default
+  const tickColors: string[] = rows.map((r) => {
+    if (r.isHeader) return GANTT_COLORS[r.jobIdx % GANTT_COLORS.length].bg;
+    return TICK;
+  });
 
   /* eslint-disable no-useless-escape */
   return `{
 type:'bar',
-data:{labels:${labels},datasets:[{data:[${data}],backgroundColor:${bgColors},borderWidth:0,borderRadius:5,borderSkipped:false,barPercentage:0.82,categoryPercentage:0.88}]},
+data:{labels:${labels},datasets:[{data:[${data}],backgroundColor:${bgColors},borderWidth:0,borderRadius:4,borderSkipped:false,barPercentage:0.7,categoryPercentage:1.0}]},
 options:{
   indexAxis:'y',
   plugins:{
     legend:{display:false},
-    title:{display:true,text:'Execution Timeline',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
+    title:{display:true,text:'Execution Timeline',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:8}},
     annotation:{annotations:{${anns.join(',')}}}
   },
   scales:{
     x:{
-      type:'linear',min:${globalMin - range * 0.02},max:${globalMax + durLabelPad},
+      type:'linear',min:${globalMin - range * 0.01},max:${globalMax + durLabelPad},
       ticks:{color:'${TICK}',font:{size:10},maxRotation:0,
         callback:function(val){if(val>${globalMax})return '';var d=new Date(val);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+':'+d.getUTCSeconds().toString().padStart(2,'0')}
       },
@@ -570,24 +581,22 @@ options:{
     },
     y:{
       ticks:{
-        color:function(ctx){var c=${tickColors};return c[ctx.index]||'${TITLE_COLOR}'},
-        font:{size:11},
+        color:${JSON.stringify(tickColors)},
+        font:{size:11,weight:function(ctx){return ${JSON.stringify(rows.map(r => r.isHeader))}[ctx.index]?'bold':'normal'}},
         padding:6
       },
       grid:{display:false},
       border:{display:false}
     }
   },
-  layout:{padding:{right:12,left:4,top:4,bottom:4}}
+  layout:{padding:{right:8,left:4,top:4,bottom:4}}
 }}`;
   /* eslint-enable no-useless-escape */
 }
 
 async function buildGanttChart(ganttJobs: GanttJob[]): Promise<string> {
   const totalSteps = ganttJobs.reduce((n, j) => n + j.steps.length, 0);
-  // Extra padding per job group for the header label (only in multi-job mode)
-  const headerPad = ganttJobs.length > 1 ? ganttJobs.length * 16 : 0;
-  const height = Math.max(160, Math.min(700, 64 + totalSteps * 30 + headerPad));
+  const height = Math.max(160, Math.min(700, 56 + totalSteps * 26));
   const chartStr = buildGanttChartString(ganttJobs);
 
   const body = JSON.stringify({

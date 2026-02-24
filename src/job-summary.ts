@@ -320,23 +320,28 @@ function collectGanttJobs(report: AggregatedReport, jobs?: JobReport[]): GanttJo
 }
 
 function buildGanttChartString(ganttJobs: GanttJob[]): string {
-  const rows: { label: string; startMs: number; endMs: number; durStr: string; color: string; isSep: boolean }[] = [];
-  const groups: { startRow: number; endRow: number; ji: number }[] = [];
+  const multiJob = ganttJobs.length > 1;
+  const rows: { label: string; startMs: number; endMs: number; durStr: string; color: string; tickColor: string; bold: boolean; isSep: boolean }[] = [];
 
   for (let ji = 0; ji < ganttJobs.length; ji++) {
     const c = GANTT_COLORS[ji % GANTT_COLORS.length];
-    // Separator row between job groups
     if (ji > 0) {
-      rows.push({ label: '', startMs: 0, endMs: 0, durStr: '', color: 'transparent', isSep: true });
+      rows.push({ label: '', startMs: 0, endMs: 0, durStr: '', color: 'transparent', tickColor: 'transparent', bold: false, isSep: true });
     }
-    const startRow = rows.length;
-    for (const step of ganttJobs[ji].steps) {
-      const name = step.name.length > 24 ? step.name.slice(0, 22) + '..' : step.name;
+    for (let si = 0; si < ganttJobs[ji].steps.length; si++) {
+      const step = ganttJobs[ji].steps[si];
+      let name = step.name.length > 24 ? step.name.slice(0, 22) + '..' : step.name;
+      let bold = false;
+      if (multiJob && si === 0) {
+        const jn = ganttJobs[ji].jobName.length > 10 ? ganttJobs[ji].jobName.slice(0, 8) + '..' : ganttJobs[ji].jobName;
+        name = jn + ' \u203a ' + name;
+        if (name.length > 36) name = name.slice(0, 34) + '..';
+        bold = true;
+      }
       const sMs = new Date(step.started_at).getTime();
       const eMs = new Date(step.completed_at).getTime();
-      rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, isSep: false });
+      rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, tickColor: multiJob ? c.bg : TITLE_COLOR, bold, isSep: false });
     }
-    groups.push({ startRow, endRow: rows.length - 1, ji });
   }
 
   const dataRows = rows.filter((r) => !r.isSep);
@@ -365,24 +370,16 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
     }
   }
 
-  // Colored job name labels on the left + accent line per group
-  for (const g of groups) {
-    const c = GANTT_COLORS[g.ji % GANTT_COLORS.length];
-    const midY = (g.startRow + g.endRow) / 2;
-    const jobName = ganttJobs[g.ji].jobName;
-    const truncName = jobName.length > 12 ? jobName.slice(0, 10) + '..' : jobName;
-    // Job name label — positioned to the left of the chart area
-    anns.push(`jn${g.ji}:{type:'label',drawTime:'afterDraw',xValue:${globalMin},xAdjust:-12,yValue:${midY},content:['${truncName}'],color:'${c.bg}',font:{size:12,weight:'bold'},textAlign:'right'}`);
-    // Colored accent line on left edge of track area
-    anns.push(`ac${g.ji}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin - range * 0.004},xMax:${globalMin + range * 0.004},yMin:${g.startRow - trackHalf},yMax:${g.endRow + trackHalf},backgroundColor:'${c.bg}',borderWidth:0,borderRadius:3}`);
-  }
-
   // Duration labels on right
   for (let i = 0; i < rows.length; i++) {
     if (!rows[i].isSep) {
       anns.push(`du${i}:{type:'label',drawTime:'afterDatasetsDraw',xValue:${globalMax + durLabelPad * 0.5},yValue:${i},content:['${rows[i].durStr}'],color:'${TICK}',font:{size:11}}`);
     }
   }
+
+  // Scriptable y-axis: per-row tick colors and bold for group headers
+  const tickColors = JSON.stringify(rows.map((r) => r.tickColor));
+  const boldFlags = JSON.stringify(rows.map((r) => r.bold));
 
   /* eslint-disable no-useless-escape */
   return `{
@@ -404,7 +401,15 @@ options:{
       grid:{display:false},
       border:{display:false}
     },
-    y:{ticks:{color:'${TITLE_COLOR}',font:{size:11},padding:80},grid:{display:false},border:{display:false}}
+    y:{
+      ticks:{
+        color:function(ctx){var c=${tickColors};return c[ctx.index]||'${TITLE_COLOR}'},
+        font:function(ctx){var b=${boldFlags};return {size:11,weight:b[ctx.index]?'bold':'normal'}},
+        padding:8
+      },
+      grid:{display:false},
+      border:{display:false}
+    }
   },
   layout:{padding:{right:12,left:4,top:4,bottom:4}}
 }}`;

@@ -293,6 +293,100 @@ options:{
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
+// ── Multi-Job Chart (one colored line per job) ──────────────
+
+interface JobTimeline {
+  jobName: string;
+  values: number[];
+  startedAt: string;
+  endedAt: string;
+}
+
+function buildMultiJobChartString(
+  title: string,
+  jobTimelines: JobTimeline[],
+  labels: string[],
+  yAxisLabel: string,
+  globalStartMs: number,
+  globalEndMs: number,
+): string {
+  const n = labels.length;
+  const globalDur = globalEndMs - globalStartMs || 1;
+
+  const datasets: string[] = [];
+
+  for (let i = 0; i < jobTimelines.length; i++) {
+    const jt = jobTimelines[i];
+    const color = GANTT_COLORS[i % GANTT_COLORS.length];
+
+    const jobStartMs = new Date(jt.startedAt).getTime();
+    const jobEndMs = new Date(jt.endedAt).getTime();
+    const startFrac = Math.max(0, (jobStartMs - globalStartMs) / globalDur);
+    const endFrac = Math.min(1, (jobEndMs - globalStartMs) / globalDur);
+    const startIdx = Math.round(startFrac * (n - 1));
+    const endIdx = Math.round(endFrac * (n - 1));
+
+    const span = Math.max(1, endIdx - startIdx + 1);
+    const downsampled = downsample(jt.values, span);
+
+    const data: (number | null)[] = new Array(n).fill(null);
+    for (let j = 0; j < downsampled.length; j++) {
+      data[startIdx + j] = downsampled[j];
+    }
+
+    const hex = color.bg;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const fillColor = `rgba(${r},${g},${b},0.08)`;
+
+    const name = jt.jobName.replace(/'/g, "\\'");
+
+    datasets.push(`{label:'${name}',data:${JSON.stringify(data)},borderColor:'${hex}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,spanGaps:false}`);
+  }
+
+  return `{
+type:'line',
+data:{labels:${JSON.stringify(labels)},datasets:[${datasets.join(',')}]},
+options:{
+  plugins:{
+    legend:{display:true,labels:{color:'${TITLE_COLOR}',font:{size:11},boxWidth:12,padding:8}},
+    title:{display:true,text:'${title}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}}
+  },
+  scales:{
+    x:{ticks:{color:'${TICK}',font:{size:11},maxRotation:0,autoSkipPadding:20},grid:{display:false},border:{display:false}},
+    y:{beginAtZero:true,ticks:{color:'${TICK}',font:{size:11}},grid:{color:'#eff2f5'},border:{display:false},title:{display:true,text:'${yAxisLabel}',color:'${TICK}',font:{size:12}}}
+  },
+  layout:{padding:{top:4,right:16,bottom:4,left:4}}
+}}`;
+}
+
+async function buildMultiJobQuickChart(
+  title: string,
+  jobTimelines: JobTimeline[],
+  yLabel: string,
+  globalStartedAt: string,
+  globalEndedAt: string,
+): Promise<string> {
+  const maxPts = 30;
+  const labels = timeLabels(globalStartedAt, globalEndedAt, maxPts);
+  const globalStartMs = new Date(globalStartedAt).getTime();
+  const globalEndMs = new Date(globalEndedAt).getTime();
+
+  const chartStr = buildMultiJobChartString(title, jobTimelines, labels, yLabel, globalStartMs, globalEndMs);
+  const body = JSON.stringify({
+    version: CHART_VERSION,
+    backgroundColor: CHART_BG,
+    width: 760,
+    height: 250,
+    devicePixelRatio: 2,
+    format: 'png',
+    chart: chartStr,
+  });
+  const url = await postQuickChart(body);
+  return `<img src="${url}" alt="${esc(title)}" width="760">`;
+}
+
 const QUICKCHART_URL_LIMIT = 1800;
 
 function buildChartUrl(config: Record<string, any>): string {
@@ -538,47 +632,83 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
   // CPU + Memory charts via QuickChart.io
   const timeline = report.timeline;
   if (timeline && timeline.cpu_pct.length >= 2) {
-    // Collect job spans for boundary lines + centered labels on charts
-    const tStart = new Date(report.started_at).getTime();
-    const tEnd = new Date(report.ended_at).getTime();
-    const tDur = tEnd - tStart || 1;
-    const ganttJobsForSeps = collectGanttJobs(report, jobs);
-    const jobSpans: JobSpan[] = [];
-    if (ganttJobsForSeps.length > 1) {
-      for (const job of ganttJobsForSeps) {
-        if (job.steps.length === 0) continue;
-        const firstStep = job.steps[0];
-        const lastStep = job.steps[job.steps.length - 1];
-        const startFrac = Math.max(0, (new Date(firstStep.started_at).getTime() - tStart) / tDur);
-        const endFrac = Math.min(1, (new Date(lastStep.completed_at).getTime() - tStart) / tDur);
-        jobSpans.push({ jobName: job.jobName, startFrac, endFrac });
-      }
-    }
+    const hasMultiJobTimelines = jobs && jobs.length > 1 && jobs.some(j => j.report.timeline);
 
     try {
-      const cpuChart = await buildQuickChart(
-        'CPU Usage (%)',
-        timeline.cpu_pct,
-        'CPU %',
-        CPU_COLOR,
-        CPU_FILL,
-        report.started_at,
-        report.ended_at,
-        jobSpans.length > 1 ? jobSpans : undefined,
-      );
-      parts.push(cpuChart);
+      if (hasMultiJobTimelines) {
+        // Multi-job path: each job = separate colored line
+        const cpuJobTimelines: JobTimeline[] = [];
+        const memJobTimelines: JobTimeline[] = [];
+        for (const job of jobs!) {
+          if (job.report.timeline) {
+            cpuJobTimelines.push({
+              jobName: job.jobName,
+              values: job.report.timeline.cpu_pct,
+              startedAt: job.report.started_at,
+              endedAt: job.report.ended_at,
+            });
+            memJobTimelines.push({
+              jobName: job.jobName,
+              values: job.report.timeline.mem_mb,
+              startedAt: job.report.started_at,
+              endedAt: job.report.ended_at,
+            });
+          }
+        }
 
-      const memChart = await buildQuickChart(
-        'Memory Usage (MB)',
-        timeline.mem_mb,
-        'MB',
-        MEM_COLOR,
-        MEM_FILL,
-        report.started_at,
-        report.ended_at,
-        jobSpans.length > 1 ? jobSpans : undefined,
-      );
-      parts.push(memChart);
+        const cpuChart = await buildMultiJobQuickChart(
+          'CPU Usage (%)', cpuJobTimelines, 'CPU %',
+          report.started_at, report.ended_at,
+        );
+        parts.push(cpuChart);
+
+        const memChart = await buildMultiJobQuickChart(
+          'Memory Usage (MB)', memJobTimelines, 'MB',
+          report.started_at, report.ended_at,
+        );
+        parts.push(memChart);
+      } else {
+        // Single-line path: one color with optional job boundary annotations
+        const tStart = new Date(report.started_at).getTime();
+        const tEnd = new Date(report.ended_at).getTime();
+        const tDur = tEnd - tStart || 1;
+        const ganttJobsForSeps = collectGanttJobs(report, jobs);
+        const jobSpans: JobSpan[] = [];
+        if (ganttJobsForSeps.length > 1) {
+          for (const job of ganttJobsForSeps) {
+            if (job.steps.length === 0) continue;
+            const firstStep = job.steps[0];
+            const lastStep = job.steps[job.steps.length - 1];
+            const startFrac = Math.max(0, (new Date(firstStep.started_at).getTime() - tStart) / tDur);
+            const endFrac = Math.min(1, (new Date(lastStep.completed_at).getTime() - tStart) / tDur);
+            jobSpans.push({ jobName: job.jobName, startFrac, endFrac });
+          }
+        }
+
+        const cpuChart = await buildQuickChart(
+          'CPU Usage (%)',
+          timeline.cpu_pct,
+          'CPU %',
+          CPU_COLOR,
+          CPU_FILL,
+          report.started_at,
+          report.ended_at,
+          jobSpans.length > 1 ? jobSpans : undefined,
+        );
+        parts.push(cpuChart);
+
+        const memChart = await buildQuickChart(
+          'Memory Usage (MB)',
+          timeline.mem_mb,
+          'MB',
+          MEM_COLOR,
+          MEM_FILL,
+          report.started_at,
+          report.ended_at,
+          jobSpans.length > 1 ? jobSpans : undefined,
+        );
+        parts.push(memChart);
+      }
     } catch {
       // Best-effort: if QuickChart fails, skip charts
     }

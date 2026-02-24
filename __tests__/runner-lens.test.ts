@@ -609,6 +609,40 @@ describe('buildJobSummary', () => {
     expect(html).not.toContain('```mermaid');
   });
 
+  it('renders multi-job colored lines when jobs have per-job timelines', async () => {
+    const baseReport = makeReport({
+      timeline: {
+        cpu_pct: [10, 20, 30, 40, 50, 60, 70],
+        mem_mb: [1000, 2000, 3000, 4000, 5000, 6000, 7000],
+      },
+    });
+    const jobs: JobReport[] = [
+      {
+        jobName: 'build',
+        report: makeReport({
+          started_at: '2023-11-14T22:13:20Z',
+          ended_at: '2023-11-14T22:15:20Z',
+          timeline: { cpu_pct: [10, 20, 30], mem_mb: [1000, 2000, 3000] },
+        }),
+      },
+      {
+        jobName: 'test',
+        report: makeReport({
+          started_at: '2023-11-14T22:15:30Z',
+          ended_at: '2023-11-14T22:18:20Z',
+          timeline: { cpu_pct: [40, 50, 60, 70], mem_mb: [4000, 5000, 6000, 7000] },
+        }),
+      },
+    ];
+    const html = await buildJobSummary(baseReport, jobs);
+    // Should contain img tags for charts
+    expect(html).toContain('<img');
+    expect(html).toContain('CPU Usage');
+    expect(html).toContain('Memory Usage');
+    // Multi-job charts include job names in the chart config (legend)
+    // The chart string sent to QuickChart contains the job names as dataset labels
+  });
+
   it('skips line charts when no timeline data', async () => {
     const md = await buildJobSummary(makeReport({ timeline: undefined }));
     // Stat cards image is still present

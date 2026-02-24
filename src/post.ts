@@ -3,12 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DefaultArtifactClient } from '@actions/artifact';
-import type { MetricSample, SystemInfo, StepMetrics } from './types';
+import type { MetricSample, SystemInfo, StepMetrics, AggregatedReport, JobReport } from './types';
 import { parseConfig } from './config';
 import { processMetrics } from './reporter';
 import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
-import { runSummary } from './summary';
+import { runSummary, fingerprint, mergeReports } from './summary';
 import { buildJobSummary } from './job-summary';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
@@ -83,6 +83,44 @@ function loadSystemInfo(): SystemInfo {
     runner_os: process.env.RUNNER_OS ?? 'unknown',
     runner_arch: process.env.RUNNER_ARCH ?? 'unknown',
   };
+}
+
+/**
+ * Download report.json from other runner-lens artifacts already uploaded
+ * by sibling jobs that finished before this one.
+ */
+async function downloadPeerReports(ownJobName: string): Promise<JobReport[]> {
+  const artClient = new DefaultArtifactClient();
+  const { artifacts } = await artClient.listArtifacts({ latest: true });
+  const peers = artifacts.filter((a) =>
+    a.name.startsWith('runner-lens-') &&
+    a.name !== 'runner-lens-summary' &&
+    a.name !== `runner-lens-${ownJobName}`,
+  );
+
+  if (peers.length === 0) return [];
+
+  const tmpDir = path.join(os.tmpdir(), 'runnerlens-peers');
+  const reports: JobReport[] = [];
+
+  try {
+    for (const art of peers) {
+      try {
+        const dlDir = path.join(tmpDir, art.name);
+        fs.mkdirSync(dlDir, { recursive: true });
+        const { downloadPath } = await artClient.downloadArtifact(art.id, { path: dlDir });
+        const reportPath = path.join(downloadPath ?? dlDir, 'report.json');
+        if (fs.existsSync(reportPath)) {
+          const r: AggregatedReport = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
+          reports.push({ jobName: art.name.replace(/^runner-lens-/, ''), report: r });
+        }
+      } catch { /* skip individual failures */ }
+    }
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ok */ }
+  }
+
+  return reports;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -168,29 +206,49 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Job Summary (best-effort) ───────────────────────
-    if (core.getInput('write-summary').toLowerCase() !== 'false') {
-      try {
-        const summaryHtml = await buildJobSummary(report);
-        await core.summary.addRaw(summaryHtml).write();
-      } catch (e) {
-        core.debug(`RunnerLens: job summary failed — ${e}`);
-      }
-    }
-
     // ── Upload report artifact (opt-in) ────────────────
-    if (core.getInput('upload-artifact').toLowerCase() === 'true') {
+    const jobName = process.env.GITHUB_JOB || 'job';
+    const artifactUploaded = core.getInput('upload-artifact').toLowerCase() === 'true';
+    if (artifactUploaded) {
       try {
-        const jobName = process.env.GITHUB_JOB || 'job';
         const artifactName = `runner-lens-${jobName}`;
         const reportFile = path.join(DATA_DIR, 'report.json');
         fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
-        const artifact = new DefaultArtifactClient();
-        await artifact.uploadArtifact(artifactName, [reportFile], DATA_DIR);
+        const artClient = new DefaultArtifactClient();
+        await artClient.uploadArtifact(artifactName, [reportFile], DATA_DIR);
         core.info(`RunnerLens: uploaded artifact "${artifactName}"`);
       } catch (e) {
         core.debug(`RunnerLens: artifact upload failed — ${e}`);
       }
+    }
+
+    // ── Job Summary (best-effort, auto-merge) ─────────
+    // After uploading, check if other runner-lens artifacts exist from
+    // sibling jobs that already finished.  If they ran on matching
+    // hardware, write a unified summary; otherwise write individual.
+    try {
+      let summaryHtml: string;
+
+      if (artifactUploaded) {
+        const peerJobs = await downloadPeerReports(jobName);
+        const myFp = fingerprint(sysInfo);
+        const matching = peerJobs.filter((jr) => fingerprint(jr.report.system) === myFp);
+
+        if (matching.length > 0) {
+          const allJobs: JobReport[] = [...matching, { jobName, report }];
+          const merged = mergeReports(allJobs);
+          summaryHtml = await buildJobSummary(merged, allJobs);
+          core.info(`RunnerLens: unified summary with ${allJobs.length} job(s)`);
+        } else {
+          summaryHtml = await buildJobSummary(report);
+        }
+      } else {
+        summaryHtml = await buildJobSummary(report);
+      }
+
+      await core.summary.addRaw(summaryHtml).write();
+    } catch (e) {
+      core.debug(`RunnerLens: job summary failed — ${e}`);
     }
 
   } catch (err) {

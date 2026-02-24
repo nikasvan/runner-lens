@@ -694,16 +694,22 @@ describe('fingerprint', () => {
     expect(fingerprint(sys1)).toBe(fingerprint(sys2));
   });
 
-  it('groups runners with whitespace differences in cpu_model', () => {
-    const sys1 = { ...makeSysInfo(), cpu_model: 'AMD EPYC' };
-    const sys2 = { ...makeSysInfo(), cpu_model: '  AMD  EPYC  ' };
+  it('groups runners with different cpu_model (same fleet)', () => {
+    const sys1 = { ...makeSysInfo(), cpu_model: 'AMD EPYC 7763 64-Core Processor' };
+    const sys2 = { ...makeSysInfo(), cpu_model: 'AMD EPYC 7B13 64-Core Processor' };
     expect(fingerprint(sys1)).toBe(fingerprint(sys2));
   });
 
-  it('produces different fingerprints for different hardware', () => {
-    const sys1 = makeSysInfo();
-    const sys2 = { ...makeSysInfo(), cpu_count: 4, total_memory_mb: 16384 };
-    expect(fingerprint(sys1)).not.toBe(fingerprint(sys2));
+  it('groups runners with minor memory variance', () => {
+    const sys1 = { ...makeSysInfo(), total_memory_mb: 7168 };
+    const sys2 = { ...makeSysInfo(), total_memory_mb: 7100 };
+    expect(fingerprint(sys1)).toBe(fingerprint(sys2));
+  });
+
+  it('differentiates by core count (different runner tier)', () => {
+    const standard = makeSysInfo(); // 2 cores
+    const larger = { ...makeSysInfo(), cpu_count: 4 };
+    expect(fingerprint(standard)).not.toBe(fingerprint(larger));
   });
 
   it('differentiates by OS', () => {

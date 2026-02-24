@@ -22,8 +22,11 @@ import { REPORT_VERSION } from './constants';
 // ─────────────────────────────────────────────────────────────
 
 export function fingerprint(sys: SystemInfo): string {
-  const cpuNorm = sys.cpu_model.trim().replace(/\s+/g, ' ');
-  return `${sys.cpu_count}|${cpuNorm}|${sys.total_memory_mb}|${sys.runner_os}|${sys.runner_arch}`;
+  // Group by core count + OS + arch.  This correctly buckets GitHub hosted
+  // runner tiers (2-core standard vs 4/8/16-core larger runners) without
+  // splitting on cpu_model or total_memory_mb, which can vary across VMs
+  // in the same fleet even for the same runs-on label.
+  return `${sys.cpu_count}|${sys.runner_os}|${sys.runner_arch}`;
 }
 
 export function mergeReports(jobReports: JobReport[]): AggregatedReport {
@@ -121,7 +124,9 @@ export async function runSummary(_config: MonitorConfig): Promise<void> {
   try {
     // ── List artifacts for current run ──────────────────────
     const { artifacts } = await artifact.listArtifacts({ latest: true });
-    const rlArtifacts = artifacts.filter((a) => a.name.startsWith('runner-lens-'));
+    const rlArtifacts = artifacts.filter((a) =>
+      a.name.startsWith('runner-lens-') && a.name !== 'runner-lens-summary',
+    );
 
     if (rlArtifacts.length === 0) {
       core.warning('RunnerLens: no runner-lens-* artifacts found — nothing to summarize');

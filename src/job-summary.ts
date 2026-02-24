@@ -325,18 +325,13 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
 
   for (let ji = 0; ji < ganttJobs.length; ji++) {
     const c = GANTT_COLORS[ji % GANTT_COLORS.length];
+    // Separator row between job groups
     if (ji > 0) {
       rows.push({ label: '', startMs: 0, endMs: 0, durStr: '', color: 'transparent', isSep: true });
     }
     const startRow = rows.length;
-    for (let si = 0; si < ganttJobs[ji].steps.length; si++) {
-      const step = ganttJobs[ji].steps[si];
-      let name = step.name.length > 28 ? step.name.slice(0, 26) + '..' : step.name;
-      if (si === 0 && ganttJobs.length > 1) {
-        const jn = ganttJobs[ji].jobName;
-        name = jn + ' \u203a ' + name;
-        if (name.length > 34) name = name.slice(0, 32) + '..';
-      }
+    for (const step of ganttJobs[ji].steps) {
+      const name = step.name.length > 24 ? step.name.slice(0, 22) + '..' : step.name;
       const sMs = new Date(step.started_at).getTime();
       const eMs = new Date(step.completed_at).getTime();
       rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)), color: c.bg, isSep: false });
@@ -348,12 +343,10 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
   const globalMin = Math.min(...dataRows.map((r) => r.startMs));
   const globalMax = Math.max(...dataRows.map((r) => r.endMs));
   const range = globalMax - globalMin || 1;
-  // Minimum bar width: 1.5% of total range so short/0s steps are visible
   const minBarWidth = range * 0.015;
   const durLabelPad = range * 0.12;
 
   const labels = JSON.stringify(rows.map((r) => r.label));
-  // Enforce minimum bar width for short/zero-duration steps
   const data = rows.map((r) => {
     if (r.isSep) return 'null';
     const w = r.endMs - r.startMs;
@@ -364,7 +357,7 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
 
   const anns: string[] = [];
 
-  // Gray track behind each bar — match bar height exactly
+  // Gray track behind each data bar
   const trackHalf = 0.34;
   for (let i = 0; i < rows.length; i++) {
     if (!rows[i].isSep) {
@@ -372,12 +365,16 @@ function buildGanttChartString(ganttJobs: GanttJob[]): string {
     }
   }
 
-  // Job group accent line on left (only multi-job)
-  if (ganttJobs.length > 1) {
-    for (const g of groups) {
-      const c = GANTT_COLORS[g.ji % GANTT_COLORS.length];
-      anns.push(`grp${g.ji}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin - range * 0.005},xMax:${globalMin + range * 0.005},yMin:${g.startRow - 0.42},yMax:${g.endRow + 0.42},backgroundColor:'${c.bg}',borderWidth:0,borderRadius:3}`);
-    }
+  // Colored job name labels on the left + accent line per group
+  for (const g of groups) {
+    const c = GANTT_COLORS[g.ji % GANTT_COLORS.length];
+    const midY = (g.startRow + g.endRow) / 2;
+    const jobName = ganttJobs[g.ji].jobName;
+    const truncName = jobName.length > 12 ? jobName.slice(0, 10) + '..' : jobName;
+    // Job name label — positioned to the left of the chart area
+    anns.push(`jn${g.ji}:{type:'label',drawTime:'afterDraw',xValue:${globalMin},xAdjust:-12,yValue:${midY},content:['${truncName}'],color:'${c.bg}',font:{size:12,weight:'bold'},textAlign:'right'}`);
+    // Colored accent line on left edge of track area
+    anns.push(`ac${g.ji}:{type:'box',drawTime:'beforeDatasetsDraw',xMin:${globalMin - range * 0.004},xMax:${globalMin + range * 0.004},yMin:${g.startRow - trackHalf},yMax:${g.endRow + trackHalf},backgroundColor:'${c.bg}',borderWidth:0,borderRadius:3}`);
   }
 
   // Duration labels on right
@@ -407,7 +404,7 @@ options:{
       grid:{display:false},
       border:{display:false}
     },
-    y:{ticks:{color:'${TITLE_COLOR}',font:{size:11},padding:12},grid:{display:false},border:{display:false}}
+    y:{ticks:{color:'${TITLE_COLOR}',font:{size:11},padding:80},grid:{display:false},border:{display:false}}
   },
   layout:{padding:{right:12,left:4,top:4,bottom:4}}
 }}`;

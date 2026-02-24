@@ -7,7 +7,7 @@ import type { MetricSample, SystemInfo, StepMetrics, AggregatedReport, JobReport
 import { parseConfig } from './config';
 import { processMetrics } from './reporter';
 import { safePct } from './stats';
-import { fetchSteps, correlateSteps } from './steps';
+import { fetchSteps, correlateSteps, isLastJob } from './steps';
 import { runSummary, fingerprint, mergeReports } from './summary';
 import { buildJobSummary } from './job-summary';
 import {
@@ -86,8 +86,8 @@ function loadSystemInfo(): SystemInfo {
 }
 
 /**
- * Download report.json from other runner-lens artifacts already uploaded
- * by sibling jobs that finished before this one.
+ * Download report.json from runner-lens artifacts uploaded by
+ * sibling jobs that already finished.
  */
 async function downloadPeerReports(ownJobName: string): Promise<JobReport[]> {
   const artClient = new DefaultArtifactClient();
@@ -208,8 +208,7 @@ async function run(): Promise<void> {
 
     // ── Upload report artifact (opt-in) ────────────────
     const jobName = process.env.GITHUB_JOB || 'job';
-    const artifactUploaded = core.getInput('upload-artifact').toLowerCase() === 'true';
-    if (artifactUploaded) {
+    if (core.getInput('upload-artifact').toLowerCase() === 'true') {
       try {
         const artifactName = `runner-lens-${jobName}`;
         const reportFile = path.join(DATA_DIR, 'report.json');
@@ -222,14 +221,27 @@ async function run(): Promise<void> {
       }
     }
 
-    // ── Job Summary (best-effort, auto-merge) ─────────
-    // After uploading, check if other runner-lens artifacts exist from
-    // sibling jobs that already finished.  If they ran on matching
-    // hardware, write a unified summary; otherwise write individual.
+    // ── Job Summary (automatic unified or individual) ──
+    // Check if this is the last running job in the workflow.
+    // If yes: download peer artifacts and write a unified summary.
+    // If no:  skip — the last job to finish will write it.
+    // Fallback: if we can't determine (no token / API error),
+    // write an individual summary so the user always sees something.
     try {
-      let summaryHtml: string;
+      let lastJob = true;
+      if (config.githubToken) {
+        try {
+          lastJob = await isLastJob(config.githubToken);
+        } catch {
+          lastJob = true; // can't check — write individual
+        }
+      }
 
-      if (artifactUploaded) {
+      if (!lastJob) {
+        core.info('RunnerLens: other jobs still running — deferring summary');
+      } else {
+        // Try to build unified summary with peer reports
+        let summaryHtml: string;
         const peerJobs = await downloadPeerReports(jobName);
         const myFp = fingerprint(sysInfo);
         const matching = peerJobs.filter((jr) => fingerprint(jr.report.system) === myFp);
@@ -242,11 +254,9 @@ async function run(): Promise<void> {
         } else {
           summaryHtml = await buildJobSummary(report);
         }
-      } else {
-        summaryHtml = await buildJobSummary(report);
-      }
 
-      await core.summary.addRaw(summaryHtml).write();
+        await core.summary.addRaw(summaryHtml).write();
+      }
     } catch (e) {
       core.debug(`RunnerLens: job summary failed — ${e}`);
     }

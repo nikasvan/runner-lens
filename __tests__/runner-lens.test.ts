@@ -16,6 +16,7 @@ import {
 } from '../src/svg-charts';
 import { buildJobSummary } from '../src/job-summary';
 import { fingerprint, mergeReports } from '../src/summary';
+import { isLastJob } from '../src/steps';
 import type {
   MetricSample, SystemInfo, MonitorConfig, AggregatedReport, JobReport,
 } from '../src/types';
@@ -337,6 +338,20 @@ describe('fetchSteps (GitHub API)', () => {
     delete process.env.GITHUB_JOB;
     const result = await fetchSteps('fake-token');
     expect(result).toEqual([]);
+  });
+});
+
+describe('isLastJob', () => {
+  const origEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...origEnv };
+  });
+
+  it('returns true when GITHUB env vars are missing (single-job fallback)', async () => {
+    delete process.env.GITHUB_REPOSITORY;
+    delete process.env.GITHUB_RUN_ID;
+    expect(await isLastJob('fake-token')).toBe(true);
   });
 });
 

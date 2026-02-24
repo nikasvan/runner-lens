@@ -91,6 +91,36 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
   return current.steps ?? [];
 }
 
+/**
+ * Check whether this is the last running job in the workflow.
+ * Returns true when every other job has completed, meaning this
+ * job's post step is the final one — it should write the summary.
+ */
+export async function isLastJob(token: string): Promise<boolean> {
+  const repo  = process.env.GITHUB_REPOSITORY;
+  const runId = process.env.GITHUB_RUN_ID;
+  const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
+
+  if (!repo || !runId) return true; // can't check — assume single job
+
+  const url = `${apiUrl}/repos/${repo}/actions/runs/${runId}/jobs?per_page=100`;
+  const res = await httpGet(url, {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  });
+
+  if (res.status !== 200) return true; // can't check — assume single job
+
+  const data = JSON.parse(res.body);
+  const jobs: { name: string; status: string }[] = data.jobs ?? [];
+
+  // During our post step, our own job is still "in_progress".
+  // If we're the only non-completed job, we're the last one.
+  const nonCompleted = jobs.filter((j) => j.status !== 'completed');
+  return nonCompleted.length <= 1;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Correlate steps with samples
 // ─────────────────────────────────────────────────────────────

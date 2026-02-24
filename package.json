@@ -6,7 +6,7 @@
   "scripts": {
     "build": "npm run bundle:main && npm run bundle:post",
     "bundle:main": "esbuild src/main.ts --bundle --platform=node --target=node24 --outfile=dist/main/index.js --minify --sourcemap",
-    "bundle:post": "esbuild src/post.ts --bundle --platform=node --target=node24 --outfile=dist/post/index.js --minify --sourcemap --external:@resvg/resvg-wasm && mkdir -p dist/post/node_modules/@resvg && cp -r node_modules/@resvg/resvg-wasm dist/post/node_modules/@resvg/resvg-wasm",
+    "bundle:post": "esbuild src/post.ts --bundle --platform=node --target=node24 --outfile=dist/post/index.js --minify --sourcemap --external:@resvg/resvg-wasm && rm -rf dist/post/node_modules && mkdir -p dist/post/node_modules/@resvg && cp -r node_modules/@resvg/resvg-wasm dist/post/node_modules/@resvg/resvg-wasm",
     "typecheck": "tsc --noEmit",
     "test": "jest --coverage",
     "prepare": "npm run build"

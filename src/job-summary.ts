@@ -13,7 +13,6 @@ import { fmtDuration } from './svg-charts';
 // ── Palette ──────────────────────────────────────────────────
 
 const CHART_BG = '#ffffff';
-const GRID = '#d0d7de';
 const TICK = '#656d76';
 const TITLE_COLOR = '#1f2328';
 const CPU_COLOR = '#2f81f7';
@@ -192,6 +191,8 @@ function timeLabels(startedAt: string, endedAt: string, count: number): string[]
   return labels;
 }
 
+interface JobSpan { jobName: string; startFrac: number; endFrac: number }
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function buildChartConfig(
   title: string,
@@ -230,18 +231,65 @@ function buildChartConfig(
       scales: {
         x: {
           ticks: { color: TICK, font: { size: 11 }, maxRotation: 0, autoSkipPadding: 20 },
-          grid: { color: GRID },
+          grid: { display: false },
+          border: { display: false },
         },
         y: {
           beginAtZero: true,
           ticks: { color: TICK, font: { size: 11 } },
-          grid: { color: GRID },
+          grid: { color: '#eff2f5' },
+          border: { display: false },
           title: { display: true, text: yAxisLabel, color: TICK, font: { size: 12 } },
         },
       },
       layout: { padding: { top: 4, right: 16, bottom: 4, left: 4 } },
     },
   };
+}
+
+/** Build line chart config as JS string with job boundary annotations */
+function buildChartString(
+  title: string,
+  values: number[],
+  labels: string[],
+  lineColor: string,
+  fillColor: string,
+  yAxisLabel: string,
+  jobSpans: JobSpan[],
+): string {
+  const n = labels.length - 1;
+  const anns: string[] = [];
+
+  for (let i = 0; i < jobSpans.length; i++) {
+    const span = jobSpans[i];
+    const name = span.jobName.length > 14 ? span.jobName.slice(0, 12) + '..' : span.jobName;
+    const midIdx = ((span.startFrac + span.endFrac) / 2 * n).toFixed(2);
+
+    // Dashed separator line between jobs (skip before the first job)
+    if (i > 0) {
+      const bIdx = (span.startFrac * n).toFixed(2);
+      anns.push(`sl${i}:{type:'line',xMin:${bIdx},xMax:${bIdx},borderColor:'#c8ced6',borderWidth:1,borderDash:[5,3]}`);
+    }
+
+    // Centered job name label just above the x-axis
+    anns.push(`jn${i}:{type:'label',xValue:${midIdx},yValue:0,yAdjust:-14,content:'${name}',color:'${TICK}',font:{size:10,weight:'bold'},backgroundColor:'rgba(255,255,255,0.85)',padding:{top:1,bottom:1,left:4,right:4},borderRadius:2}`);
+  }
+
+  return `{
+type:'line',
+data:{labels:${JSON.stringify(labels)},datasets:[{label:'${title}',data:${JSON.stringify(values)},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2}]},
+options:{
+  plugins:{
+    legend:{display:false},
+    title:{display:true,text:'${title}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
+    annotation:{annotations:{${anns.join(',')}}}
+  },
+  scales:{
+    x:{ticks:{color:'${TICK}',font:{size:11},maxRotation:0,autoSkipPadding:20},grid:{display:false},border:{display:false}},
+    y:{beginAtZero:true,ticks:{color:'${TICK}',font:{size:11}},grid:{color:'#eff2f5'},border:{display:false},title:{display:true,text:'${yAxisLabel}',color:'${TICK}',font:{size:12}}}
+  },
+  layout:{padding:{top:4,right:16,bottom:20,left:4}}
+}}`;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -262,14 +310,17 @@ async function buildQuickChart(
   fillColor: string,
   startedAt: string,
   endedAt: string,
+  jobSpans?: JobSpan[],
 ): Promise<string> {
   const maxPts = 30;
   const data = downsample(values, maxPts);
   const labels = timeLabels(startedAt, endedAt, data.length);
-  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel);
 
-  let url = buildChartUrl(config);
-  if (url.length > QUICKCHART_URL_LIMIT) {
+  let url: string;
+  if (jobSpans && jobSpans.length > 0) {
+    // Use JS string config + POST for job boundary annotations
+    // (same rendering path as Gantt chart — proven to work)
+    const chartStr = buildChartString(title, data, labels, lineColor, fillColor, yLabel, jobSpans);
     const body = JSON.stringify({
       version: CHART_VERSION,
       backgroundColor: CHART_BG,
@@ -277,12 +328,27 @@ async function buildQuickChart(
       height: 250,
       devicePixelRatio: 2,
       format: 'png',
-      chart: config,
+      chart: chartStr,
     });
-    try {
-      url = await postQuickChart(body);
-    } catch {
-      // If short-URL fails, use long URL anyway
+    url = await postQuickChart(body);
+  } else {
+    const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel);
+    url = buildChartUrl(config);
+    if (url.length > QUICKCHART_URL_LIMIT) {
+      const body = JSON.stringify({
+        version: CHART_VERSION,
+        backgroundColor: CHART_BG,
+        width: 760,
+        height: 250,
+        devicePixelRatio: 2,
+        format: 'png',
+        chart: config,
+      });
+      try {
+        url = await postQuickChart(body);
+      } catch {
+        // If short-URL fails, use long URL anyway
+      }
     }
   }
 
@@ -472,6 +538,23 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
   // CPU + Memory charts via QuickChart.io
   const timeline = report.timeline;
   if (timeline && timeline.cpu_pct.length >= 2) {
+    // Collect job spans for boundary lines + centered labels on charts
+    const tStart = new Date(report.started_at).getTime();
+    const tEnd = new Date(report.ended_at).getTime();
+    const tDur = tEnd - tStart || 1;
+    const ganttJobsForSeps = collectGanttJobs(report, jobs);
+    const jobSpans: JobSpan[] = [];
+    if (ganttJobsForSeps.length > 1) {
+      for (const job of ganttJobsForSeps) {
+        if (job.steps.length === 0) continue;
+        const firstStep = job.steps[0];
+        const lastStep = job.steps[job.steps.length - 1];
+        const startFrac = Math.max(0, (new Date(firstStep.started_at).getTime() - tStart) / tDur);
+        const endFrac = Math.min(1, (new Date(lastStep.completed_at).getTime() - tStart) / tDur);
+        jobSpans.push({ jobName: job.jobName, startFrac, endFrac });
+      }
+    }
+
     try {
       const cpuChart = await buildQuickChart(
         'CPU Usage (%)',
@@ -481,6 +564,7 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
         CPU_FILL,
         report.started_at,
         report.ended_at,
+        jobSpans.length > 1 ? jobSpans : undefined,
       );
       parts.push(cpuChart);
 
@@ -492,6 +576,7 @@ export async function buildJobSummary(report: AggregatedReport, jobs?: JobReport
         MEM_FILL,
         report.started_at,
         report.ended_at,
+        jobSpans.length > 1 ? jobSpans : undefined,
       );
       parts.push(memChart);
     } catch {

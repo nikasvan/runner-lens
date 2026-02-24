@@ -11,7 +11,7 @@ import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import { buildJobSummary } from '../src/job-summary';
 import type {
-  MetricSample, SystemInfo, MonitorConfig, AggregatedReport,
+  MetricSample, SystemInfo, AggregatedReport,
 } from '../src/types';
 
 // ─────────────────────────────────────────────────────────────
@@ -48,15 +48,6 @@ function makeSysInfo(): SystemInfo {
     runner_name: 'GitHub Actions 2',
     runner_os: 'Linux',
     runner_arch: 'X64',
-  };
-}
-
-function makeConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
-  return {
-    sampleInterval: 3,
-    maxSizeMb: 100,
-    githubToken: '',
-    ...overrides,
   };
 }
 
@@ -128,7 +119,7 @@ describe('processMetrics', () => {
     const s1 = makeSample({ timestamp: 1700000000 });
     const s2 = makeSample({ timestamp: 1700000003 });
     const { report } = processMetrics(
-      [s1, s2], makeSysInfo(), makeConfig(), 6,
+      [s1, s2], makeSysInfo(), 6,
     );
 
     // Report fields
@@ -141,7 +132,7 @@ describe('processMetrics', () => {
 
   it('handles zero-duration gracefully (no NaN/Infinity)', () => {
     const s = makeSample();
-    const { report } = processMetrics([s], makeSysInfo(), makeConfig(), 0);
+    const { report } = processMetrics([s], makeSysInfo(), 0);
     expect(Number.isFinite(report.cpu.avg)).toBe(true);
     expect(Number.isFinite(report.memory.avg)).toBe(true);
   });
@@ -153,7 +144,7 @@ describe('processMetrics', () => {
     const s2 = makeSample({
       processes: [{ pid: 1, name: 'node', cpu_pct: 80, mem_mb: 200 }],
     });
-    const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6);
+    const { report } = processMetrics([s1, s2], makeSysInfo(), 6);
     const nodeProcs = report.top_processes.filter((p) => p.name === 'node');
     expect(nodeProcs).toHaveLength(1);
     expect(nodeProcs[0].cpu_pct).toBe(80);
@@ -163,7 +154,7 @@ describe('processMetrics', () => {
     const s = makeSample({
       memory: { total_mb: 7168, used_mb: 6000, available_mb: 1168, cached_mb: 512, swap_total_mb: 2048, swap_used_mb: 768, usage_pct: 83.7 },
     });
-    const { report } = processMetrics([s], makeSysInfo(), makeConfig(), 3);
+    const { report } = processMetrics([s], makeSysInfo(), 3);
     expect(report.memory.swap_max_mb).toBe(768);
   });
 
@@ -175,14 +166,14 @@ describe('processMetrics', () => {
         memory: { total_mb: 7168, used_mb: 2000 + i * 10, available_mb: 5168, cached_mb: 1024, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 30 },
       }),
     );
-    const { report } = processMetrics(samples, makeSysInfo(), makeConfig(), 300);
+    const { report } = processMetrics(samples, makeSysInfo(), 300);
     expect(report.timeline).toBeDefined();
     expect(report.timeline!.cpu_pct).toHaveLength(80);
     expect(report.timeline!.mem_mb).toHaveLength(80);
   });
 
   it('omits timeline for single sample', () => {
-    const { report } = processMetrics([makeSample()], makeSysInfo(), makeConfig(), 3);
+    const { report } = processMetrics([makeSample()], makeSysInfo(), 3);
     expect(report.timeline).toBeUndefined();
   });
 
@@ -193,14 +184,14 @@ describe('processMetrics', () => {
       { name: 'Checkout', number: 1, duration_seconds: 3, cpu_avg: 30, cpu_max: 45, mem_avg_mb: 2048, mem_max_mb: 3072, sample_count: 1, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:23Z' },
       { name: 'Build', number: 2, duration_seconds: 3, cpu_avg: 60, cpu_max: 90, mem_avg_mb: 3072, mem_max_mb: 5120, sample_count: 1, started_at: '2023-11-14T22:13:23Z', completed_at: '2023-11-14T22:13:26Z' },
     ];
-    const { report } = processMetrics([s1, s2], makeSysInfo(), makeConfig(), 6, steps);
+    const { report } = processMetrics([s1, s2], makeSysInfo(), 6, steps);
     expect(report.steps).toHaveLength(2);
     expect(report.steps![0].name).toBe('Checkout');
   });
 
   it('omits steps when empty array is passed', () => {
     const s = makeSample();
-    const { report } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6, []);
+    const { report } = processMetrics([s, s], makeSysInfo(), 6, []);
     expect(report.steps).toBeUndefined();
   });
 
@@ -208,7 +199,7 @@ describe('processMetrics', () => {
     const samples = Array(10).fill(null).map((_, i) =>
       makeSample({ timestamp: 1700000000 + i * 3 }),
     );
-    const { report } = processMetrics(samples, makeSysInfo(), makeConfig(), 30);
+    const { report } = processMetrics(samples, makeSysInfo(), 30);
     expect(report.timeline).toBeDefined();
     expect(report.timeline!.cpu_pct).toHaveLength(10);
     expect(report.timeline!.mem_mb).toHaveLength(10);
@@ -303,7 +294,7 @@ describe('correlateSteps', () => {
 describe('collector stats', () => {
   it('includes collector overhead in report', () => {
     const s = makeSample({ collector: { cpu_pct: 0.3, mem_mb: 4.0 } });
-    const { report } = processMetrics([s, s], makeSysInfo(), makeConfig(), 6);
+    const { report } = processMetrics([s, s], makeSysInfo(), 6);
     expect(report.collector).toBeDefined();
     expect(report.collector!.avg_cpu_pct).toBeCloseTo(0.3);
     expect(report.collector!.avg_mem_mb).toBeCloseTo(4.0);
@@ -312,7 +303,7 @@ describe('collector stats', () => {
 
   it('omits collector stats when samples lack collector field', () => {
     const s = makeSample({ collector: undefined });
-    const { report } = processMetrics([s], makeSysInfo(), makeConfig(), 3);
+    const { report } = processMetrics([s], makeSysInfo(), 3);
     expect(report.collector).toBeUndefined();
   });
 });
@@ -353,7 +344,7 @@ describe('edge cases', () => {
 
   it('processMetrics with a single sample does not crash', () => {
     const s = makeSample();
-    expect(() => processMetrics([s], makeSysInfo(), makeConfig(), 3)).not.toThrow();
+    expect(() => processMetrics([s], makeSysInfo(), 3)).not.toThrow();
   });
 
   it('reporter handles samples with missing optional fields', () => {
@@ -364,7 +355,7 @@ describe('edge cases', () => {
       load: { load1: 0, load5: 0, load15: 0 },
       processes: [],
     };
-    const { report } = processMetrics([sparse], makeSysInfo(), makeConfig(), 3);
+    const { report } = processMetrics([sparse], makeSysInfo(), 3);
     expect(report.top_processes).toEqual([]);
     expect(report.collector).toBeUndefined();
   });

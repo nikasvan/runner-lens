@@ -1,5 +1,5 @@
 import type {
-  MetricSample, SystemInfo, MonitorConfig,
+  MetricSample, SystemInfo,
   AggregatedReport, ProcessInfo, StepMetrics,
 } from './types';
 import { stats, safeMax } from './stats';
@@ -95,7 +95,6 @@ function aggregate(
 export function processMetrics(
   samples: MetricSample[],
   sysInfo: SystemInfo,
-  _config: MonitorConfig,
   durationSec: number,
   steps?: StepMetrics[],
 ): {

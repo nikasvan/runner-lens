@@ -8,6 +8,7 @@ import { parseConfig } from './config';
 import { processMetrics } from './reporter';
 import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
+
 import { buildJobSummary } from './job-summary';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
@@ -137,7 +138,7 @@ async function run(): Promise<void> {
     }
 
     // ── Process ───────────────────────────────────────────
-    const { report } = processMetrics(samples, sysInfo, config, dur, steps);
+    const { report } = processMetrics(samples, sysInfo, dur, steps);
 
     // ── Reporter self-monitoring ──────────────────────────
     const cpuDelta = process.cpuUsage(cpuStart);

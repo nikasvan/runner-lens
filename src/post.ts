@@ -1,16 +1,13 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as path from 'path';
-import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
-import { processMetrics, buildJobMarkdown } from './reporter';
-import { uploadChartSvgs } from './svg-upload';
-import { sendToApi } from './api-client';
+import { processMetrics } from './reporter';
 import { safePct } from './stats';
 import { fetchSteps, correlateSteps } from './steps';
 import { runSummary } from './summary';
+import { buildJobSummary } from './job-summary';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
 } from './constants';
@@ -145,7 +142,7 @@ async function run(): Promise<void> {
     }
 
     // ── Process ───────────────────────────────────────────
-    const { report, charts } = processMetrics(samples, sysInfo, config, dur, steps);
+    const { report } = processMetrics(samples, sysInfo, config, dur, steps);
 
     // ── Reporter self-monitoring ──────────────────────────
     // Use total job duration as denominator so the % is directly
@@ -169,49 +166,12 @@ async function run(): Promise<void> {
     core.setOutput('duration-seconds', dur.toString());
     core.setOutput('report-json', JSON.stringify(report));
 
-    // ── Upload SVG charts as artifacts (for external reference) ──
-    if (config.githubToken && Object.keys(charts).length > 0) {
-      await uploadChartSvgs(charts, config.githubToken);
-    }
-    // Build per-job markdown with quickchart.io image URLs
-    const markdown = buildJobMarkdown(report, samples, config);
-
-    if (markdown) {
-      await core.summary.addRaw(markdown).write();
-      core.info('RunnerLens: report written to Job Summary');
-    }
-
-    // ── API upload ────────────────────────────────────────
-    if (config.apiKey) {
-      await sendToApi(config, report, samples);
-    }
-
-    // ── Artifact upload ─────────────────────────────────
-    // Always upload report.json so summarize mode can aggregate.
-    // The upload-artifact flag controls whether the larger samples.json is included.
-    {
-      try {
-        const jobName = process.env.GITHUB_JOB ?? 'unknown';
-        const artifactName = `runner-lens-${jobName}`;
-        const artifactDir = path.join(DATA_DIR, 'artifact');
-        fs.mkdirSync(artifactDir, { recursive: true });
-
-        const reportFile = path.join(artifactDir, 'report.json');
-        fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
-
-        const files = [reportFile];
-        if (core.getInput('upload-artifact') === 'true') {
-          const samplesFile = path.join(artifactDir, 'samples.json');
-          fs.writeFileSync(samplesFile, JSON.stringify(samples, null, 2));
-          files.push(samplesFile);
-        }
-
-        const artifact = new DefaultArtifactClient();
-        await artifact.uploadArtifact(artifactName, files, artifactDir);
-        core.info(`RunnerLens: report uploaded as artifact "${artifactName}"`);
-      } catch (e) {
-        core.warning(`RunnerLens: artifact upload failed — ${e}`);
-      }
+    // ── Job Summary (best-effort) ───────────────────────
+    try {
+      const summaryHtml = buildJobSummary(report);
+      await core.summary.addRaw(summaryHtml).write();
+    } catch (e) {
+      core.debug(`RunnerLens: job summary failed — ${e}`);
     }
 
   } catch (err) {

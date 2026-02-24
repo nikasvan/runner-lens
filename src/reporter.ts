@@ -2,13 +2,7 @@ import type {
   MetricSample, SystemInfo, MonitorConfig,
   AggregatedReport, ProcessInfo, StepMetrics,
 } from './types';
-import { stats, safeMax, safePct } from './stats';
-import { fmtDuration } from './charts';
-import {
-  resolvedSvg, statCards, timelineChart, stepBarChart,
-} from './svg-charts';
-import { timelineChartUrl } from './quickchart';
-import { htmlStatCards, htmlStepBars, htmlGaugeBars } from './html-summary';
+import { stats, safeMax } from './stats';
 import { REPORT_VERSION } from './constants';
 
 const TIMELINE_POINTS = 80;
@@ -95,165 +89,18 @@ function aggregate(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Generate SVG charts for upload (raw SVG strings)
-// ─────────────────────────────────────────────────────────────
-
-function generateSvgCharts(
-  report: AggregatedReport,
-  samples: MetricSample[],
-  config: MonitorConfig,
-): Record<string, string> {
-  const charts: Record<string, string> = {};
-  const minimal = config.summaryStyle === 'minimal';
-  const sys = report.system;
-
-  const cpuAvgPct = report.cpu.avg;
-  const cpuPeakPct = report.cpu.max;
-  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
-  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
-
-  // Stat cards
-  charts['stat-cards'] = resolvedSvg(statCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, colorVar: 'muted' },
-    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, colorVar: 'accent-cyan' },
-    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, colorVar: 'accent-blue' },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, colorVar: 'accent-purple' },
-  ]));
-
-  // Per-step bar chart
-  if (report.steps && report.steps.length > 0) {
-    const svg = stepBarChart(
-      report.steps.map(s => ({ name: s.name, value: s.duration_seconds })),
-      { formatValue: fmtDuration },
-    );
-    if (svg) charts['step-chart'] = resolvedSvg(svg);
-  }
-
-  // Timeline chart
-  if (!minimal) {
-    const cpuV = samples.map(s => s.cpu.usage);
-    const memV = samples.map(s => s.memory.usage_pct);
-    if (cpuV.length >= 4) {
-      const svg = timelineChart(cpuV, memV, {
-        cpuAvg: cpuAvgPct,
-        memAvg: memAvgPct,
-      });
-      if (svg) charts['timeline'] = resolvedSvg(svg);
-    }
-  }
-
-  return charts;
-}
-
-// ─────────────────────────────────────────────────────────────
-// Markdown builder
-// Stat cards and step bars use pure HTML with inline styles.
-// Timeline uses quickchart.io (line charts need actual drawing).
-// ─────────────────────────────────────────────────────────────
-
-function markdown(
-  report: AggregatedReport,
-  samples: MetricSample[],
-  config: MonitorConfig,
-): string {
-  const L: string[] = [];
-  const minimal = config.summaryStyle === 'minimal';
-  const sys = report.system;
-
-  const cpuAvgPct = report.cpu.avg;
-  const cpuPeakPct = report.cpu.max;
-  const memAvgPct = safePct(report.memory.avg, report.memory.total_mb);
-  const memPeakPct = safePct(report.memory.max, report.memory.total_mb);
-
-  // ── Header ──────────────────────────────────────────────
-  L.push('## 📊 RunnerLens\n');
-
-  // ── Stat cards (HTML) ──────────────────────────────────
-  L.push(htmlStatCards([
-    { label: 'Runner', value: `${sys.cpu_count} × ${sys.cpu_model}`, sub: `${(sys.total_memory_mb / 1024).toFixed(1)} GB RAM · ${sys.runner_os}`, color: '#8b949e' },
-    { label: 'Duration', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples`, color: '#39d2c0' },
-    { label: 'Avg CPU', value: `${cpuAvgPct.toFixed(0)}%`, sub: `peak ${cpuPeakPct.toFixed(0)}%`, color: '#58a6ff' },
-    { label: 'Memory', value: `${memAvgPct.toFixed(0)}% avg`, sub: `peak ${memPeakPct.toFixed(0)}% · ${(report.memory.max / 1024).toFixed(1)} GB`, color: '#bc8cff' },
-  ]) + '\n');
-
-  // ── CPU/Memory gauge bars (HTML) ──────────────────────
-  L.push(htmlGaugeBars({
-    cpuAvg: cpuAvgPct,
-    cpuPeak: cpuPeakPct,
-    memAvgPct,
-    memPeakPct,
-    memPeakGb: `${(report.memory.max / 1024).toFixed(1)} GB`,
-  }) + '\n');
-
-  // ── Per-step bar chart (HTML) ──────────────────────────
-  if (report.steps && report.steps.length > 0) {
-    L.push('### Steps\n');
-    L.push(htmlStepBars(
-      report.steps.map(s => ({ name: s.name, durationSec: s.duration_seconds })),
-    ) + '\n');
-  }
-
-  // ── Timeline (quickchart.io — line charts need real drawing)
-  if (!minimal) {
-    const cpuV = samples.map(s => s.cpu.usage);
-    const memV = samples.map(s => s.memory.usage_pct);
-    if (cpuV.length >= 4) {
-      const tlUrl = timelineChartUrl(cpuV, memV, {
-        cpuAvg: cpuAvgPct,
-        memAvg: memAvgPct,
-      });
-      L.push('### Timeline\n');
-      L.push(`<img src="${tlUrl}" alt="CPU &amp; Memory Timeline" width="600" height="200" />\n`);
-    }
-  }
-
-  // ── Footer ─────────────────────────────────────────────
-  L.push('---');
-  const collectorInfo = report.collector
-    ? ` · Sampling: ${report.collector.avg_cpu_pct.toFixed(1)}% CPU · ${report.collector.avg_mem_mb.toFixed(1)} MB RAM`
-    : '';
-  const reporterInfo = report.reporter
-    ? ` · Reporting: ${report.reporter.cpu_pct.toFixed(1)}% CPU · ${report.reporter.mem_mb.toFixed(1)} MB RAM`
-    : '';
-  L.push(
-    `<sub><a href="https://runnerlens.com">RunnerLens</a> ` +
-    `v${REPORT_VERSION} · ${report.started_at} → ${report.ended_at}${collectorInfo}${reporterInfo}</sub>`,
-  );
-
-  return L.join('\n');
-}
-
-// ─────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────
 
 export function processMetrics(
   samples: MetricSample[],
   sysInfo: SystemInfo,
-  config: MonitorConfig,
+  _config: MonitorConfig,
   durationSec: number,
   steps?: StepMetrics[],
 ): {
   report: AggregatedReport;
-  charts: Record<string, string>;    // Raw SVG strings for upload
 } {
   const report = aggregate(samples, sysInfo, durationSec, steps);
-  if (config.summaryStyle === 'none') {
-    return { report, charts: {} };
-  }
-  const charts = generateSvgCharts(report, samples, config);
-  return { report, charts };
-}
-
-/**
- * Build the per-job markdown summary using quickchart.io image URLs.
- * GitHub Job Summary only renders <img src="https://..."> tags.
- */
-export function buildJobMarkdown(
-  report: AggregatedReport,
-  samples: MetricSample[],
-  config: MonitorConfig,
-): string {
-  if (config.summaryStyle === 'none') return '';
-  return markdown(report, samples, config);
+  return { report };
 }

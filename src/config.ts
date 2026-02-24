@@ -13,15 +13,6 @@ function intInput(name: string, fallback: number): number {
 }
 
 export function parseConfig(): MonitorConfig {
-  const apiKey = core.getInput('api-key');
-  if (apiKey) core.setSecret(apiKey);
-
-  const style = core.getInput('summary-style') || 'full';
-  const validStyles = ['full', 'compact', 'minimal', 'none'] as const;
-  const summaryStyle = validStyles.includes(style as typeof validStyles[number])
-    ? (style as MonitorConfig['summaryStyle'])
-    : 'full';
-
   // Auto-detect: explicit input → GITHUB_TOKEN env → ACTIONS_RUNTIME_TOKEN env
   const githubToken = core.getInput('github-token')
     || process.env.GITHUB_TOKEN
@@ -34,10 +25,7 @@ export function parseConfig(): MonitorConfig {
   return {
     mode,
     sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),
-    summaryStyle,
     maxSizeMb: Math.max(0, intInput('max-file-size', 100)),
-    apiKey,
-    apiEndpoint: core.getInput('api-endpoint') || 'https://api.runnerlens.com',
     githubToken,
   };
 }

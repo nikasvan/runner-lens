@@ -1,8 +1,7 @@
 name: 'RunnerLens'
 description: >
   Zero-config observability for GitHub Actions runners.
-  Monitor CPU and memory usage with sparkline charts
-  in your Job Summary.
+  Monitor CPU and memory usage in your workflow.
 author: 'RunnerLens'
 
 branding:
@@ -14,14 +13,6 @@ inputs:
     description: 'Action mode: monitor (default) or summarize (workflow-level summary)'
     required: false
     default: 'monitor'
-  api-key:
-    description: 'RunnerLens API key for the SaaS dashboard (optional)'
-    required: false
-    default: ''
-  api-endpoint:
-    description: 'RunnerLens API endpoint (override for self-hosted)'
-    required: false
-    default: 'https://api.runnerlens.com'
   sample-interval:
     description: 'Metric sampling interval in seconds (1–30)'
     required: false
@@ -30,18 +21,10 @@ inputs:
     description: 'GitHub token for per-step metrics (defaults to the built-in token)'
     required: false
     default: ${{ github.token }}
-  summary-style:
-    description: 'Report style in Job Summary: full | compact | minimal | none'
-    required: false
-    default: 'full'
   max-file-size:
     description: 'Maximum metrics file size in MB before rotation (0 = unlimited)'
     required: false
     default: '100'
-  upload-artifact:
-    description: 'Upload raw samples and report as a workflow artifact'
-    required: false
-    default: 'false'
 
 outputs:
   cpu-avg:

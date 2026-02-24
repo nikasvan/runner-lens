@@ -1,0 +1,6 @@
+node_modules
+coverage
+
+# sourcemaps (large debug artifacts, not needed at runtime)
+*.map
+*.tsbuildinfo

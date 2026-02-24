@@ -117,6 +117,9 @@ export function correlateSteps(
 
       const duration = Math.max(0, endSec - startSec);
 
+      const startedAt = step.started_at!;
+      const completedAt = step.completed_at ?? new Date(nowSec * 1000).toISOString();
+
       if (window.length === 0) {
         return {
           name: step.name,
@@ -127,6 +130,8 @@ export function correlateSteps(
           mem_avg_mb: 0,
           mem_max_mb: 0,
           sample_count: 0,
+          started_at: startedAt,
+          completed_at: completedAt,
         };
       }
 
@@ -142,6 +147,8 @@ export function correlateSteps(
         mem_avg_mb: memVals.reduce((a, b) => a + b, 0) / memVals.length,
         mem_max_mb: safeMax(memVals),
         sample_count: window.length,
+        started_at: startedAt,
+        completed_at: completedAt,
       };
     });
 }

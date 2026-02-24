@@ -62,10 +62,7 @@ export interface SystemInfo {
 export interface MonitorConfig {
   mode: 'monitor' | 'summarize';
   sampleInterval: number;
-  summaryStyle: 'full' | 'compact' | 'minimal' | 'none';
   maxSizeMb: number;
-  apiKey: string;
-  apiEndpoint: string;
   githubToken: string;
 }
 
@@ -88,6 +85,8 @@ export interface StepMetrics {
   mem_avg_mb: number;
   mem_max_mb: number;
   sample_count: number;
+  started_at: string;
+  completed_at: string;
 }
 
 export interface AggregatedReport {
@@ -117,17 +116,3 @@ export interface JobReport {
   report: AggregatedReport;
 }
 
-export interface IngestPayload {
-  version: string;
-  run_id: string;
-  run_number: number;
-  workflow: string;
-  job: string;
-  repository: string;
-  ref: string;
-  sha: string;
-  actor: string;
-  event_name: string;
-  report: AggregatedReport;
-  samples?: MetricSample[];
-}

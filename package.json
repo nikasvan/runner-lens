@@ -9,11 +9,9 @@
     "bundle:post": "esbuild src/post.ts --bundle --platform=node --target=node24 --outfile=dist/post/index.js --minify --sourcemap",
     "typecheck": "tsc --noEmit",
     "test": "jest --coverage",
-    "preview": "jest --testPathIgnorePatterns=[] --testMatch='**/*preview-gen*' --no-coverage",
     "prepare": "npm run build"
   },
   "dependencies": {
-    "@actions/artifact": "^6.1.0",
     "@actions/core": "^1.11.1",
     "@actions/exec": "^1.1.1"
   },

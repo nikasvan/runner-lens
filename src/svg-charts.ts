@@ -1,148 +1,42 @@
 // ─────────────────────────────────────────────────────────────
-// RunnerLens — SVG Charts v2 for GitHub Job Summary
+// RunnerLens — Dark-Themed SVG Chart Rendering
 // ─────────────────────────────────────────────────────────────
 
-import { fmtDuration } from './charts';
+// ── Theme ────────────────────────────────────────────────────
 
-// ── Internal helpers ────────────────────────────────────────
+const BG = '#0d1117';
+const CARD = '#161b22';
+const BORDER = '#30363d';
+const GRID = '#21262d';
+const TEXT = '#e6edf3';
+const MUTED = '#8b949e';
+const GREEN = '#3fb950';
+const BLUE = '#58a6ff';
+const PURPLE = '#bc8cff';
+const FONT =
+  'ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,Liberation Mono,monospace';
 
-/**
- * Dark-mode color map — resolved values for CSS custom properties.
- * GitHub Job Summary strips <style> tags from inline SVGs, so we
- * resolve var(--name) references to static color values at build time.
- */
-const THEME: Record<string, string> = {
-  '--bg': '#0d1117',
-  '--bg-card': '#161b22',
-  '--fg': '#e6edf3',
-  '--grid': '#30363d',
-  '--grid-subtle': '#21262d',
-  '--muted': '#8b949e',
-  '--cpu-stroke': '#58a6ff',
-  '--cpu-fill': 'rgba(88,166,255,0.25)',
-  '--mem-stroke': '#bc8cff',
-  '--mem-fill': 'rgba(188,140,255,0.25)',
-  '--bar-fill': '#58a6ff',
-  '--bar-bg': '#21262d',
-  '--accent-blue': '#58a6ff',
-  '--accent-purple': '#bc8cff',
-  '--accent-cyan': '#39d2c0',
-  '--accent-green': '#3fb950',
-  '--group-band': 'rgba(255,255,255,0.02)',
-};
+// ── Helpers ──────────────────────────────────────────────────
 
-/** Resolve all var(--name) references in an SVG string to static colors. */
-function resolveVars(svg: string): string {
-  return svg.replace(/var\(--([a-z-]+)\)/g, (match, name) => {
-    return THEME[`--${name}`] ?? match;
-  });
-}
-
-const MONO_FONT = 'ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,Liberation Mono,monospace';
-
-/** Inject font-family into <text> elements (GitHub strips <style> tags). */
-function injectFonts(svg: string): string {
-  return svg.replace(/<text /g, `<text font-family="${MONO_FONT}" `);
-}
-
-/**
- * Process an SVG for standalone use: resolve CSS variables to static
- * color values, inject font-family into text elements, and strip
- * <style> blocks.  Returns the raw SVG string (not wrapped in <img>).
- */
-export function resolvedSvg(svg: string): string {
-  let resolved = resolveVars(svg);
-  resolved = injectFonts(resolved);
-  resolved = resolved.replace(/<style>[\s\S]*?<\/style>/g, '');
-  resolved = resolved.replace(/<defs>\s*<\/defs>/g, '');
-  return resolved;
-}
-
-/**
- * Embed an SVG as a base64 <img> tag for GitHub Job Summary.
- * GitHub's HTML sanitizer strips inline <svg> elements, so we encode
- * the SVG as a data-URI and use an <img> tag which GitHub allows.
- * Resolves CSS variables to static values and strips the <style> block
- * before encoding.
- */
-export function svgImg(svg: string, alt: string, _width?: number, _height?: number): string {
-  let resolved = resolveVars(svg);
-  resolved = injectFonts(resolved);
-  // Strip <style> blocks (GitHub sanitizer removes them anyway)
-  resolved = resolved.replace(/<style>[\s\S]*?<\/style>/g, '');
-  // Clean up empty <defs></defs>
-  resolved = resolved.replace(/<defs>\s*<\/defs>/g, '');
-
-  // Extract width/height from the SVG root element for the img tag
-  const wMatch = resolved.match(/width="(\d+)"/);
-  const hMatch = resolved.match(/height="(\d+)"/);
-  const w = _width ?? (wMatch ? Number(wMatch[1]) : undefined);
-  const h = _height ?? (hMatch ? Number(hMatch[1]) : undefined);
-
-  const b64 = Buffer.from(resolved).toString('base64');
-  const sizeAttrs = (w ? ` width="${w}"` : '') + (h ? ` height="${h}"` : '');
-  return `<img src="data:image/svg+xml;base64,${b64}" alt="${alt}"${sizeAttrs} />`;
-}
-
-/**
- * Returns an empty string — the <style> block is no longer used.
- * CSS variables are resolved to static values by svgImg() at embed time.
- * Kept as a function so chart builders can still call it in <defs>.
- */
-function themeStyles(): string {
-  return '';
-}
-
-/** Down-sample values to ≤ width points using linear interpolation. */
-function resample(values: number[], width: number): number[] {
-  if (values.length <= width) return values;
-  const out: number[] = [];
-  const step = (values.length - 1) / (width - 1);
-  for (let i = 0; i < width; i++) {
-    const pos  = i * step;
-    const lo   = Math.floor(pos);
-    const hi   = Math.min(lo + 1, values.length - 1);
-    const frac = pos - lo;
-    out.push(values[lo] * (1 - frac) + values[hi] * frac);
-  }
-  return out;
-}
-
-/** Build an SVG polyline path d-attribute from data points. */
-function polylinePath(points: Array<{ x: number; y: number }>): string {
-  if (points.length === 0) return '';
-  let d = `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
-  for (let i = 1; i < points.length; i++) {
-    d += ` L${points[i].x.toFixed(1)},${points[i].y.toFixed(1)}`;
-  }
-  return d;
-}
-
-/** Build a smooth cubic bezier path from data points. */
-function smoothPath(points: Array<{ x: number; y: number }>): string {
-  if (points.length === 0) return '';
-  if (points.length === 1) return `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
-  let d = `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
-  for (let i = 1; i < points.length; i++) {
-    const x0 = points[i - 1].x, y0 = points[i - 1].y;
-    const x1 = points[i].x, y1 = points[i].y;
-    const cx = (x0 + x1) / 2;
-    d += ` C${cx.toFixed(1)},${y0.toFixed(1)} ${cx.toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
-  }
-  return d;
-}
-
-/** Escape a string for safe use inside SVG <text> elements. */
-function escapeXml(s: string): string {
+function esc(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    .replace(/"/g, '&quot;');
 }
 
-/** Format an ISO timestamp to a short time string (HH:MM). */
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + '\u2026' : s;
+}
+
+function fmtDuration(sec: number): string {
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   const h = d.getUTCHours().toString().padStart(2, '0');
@@ -150,587 +44,316 @@ function fmtTime(iso: string): string {
   return `${h}:${m}`;
 }
 
-// ── Timeline Area Chart ─────────────────────────────────────
-
-export interface TimelineOpts {
-  width?: number;
-  height?: number;
-  cpuAvg?: number;
-  memAvg?: number;
-  dataPoints?: number;
+/** Encode SVG as a base64 <img> tag for GitHub Job Summary. */
+export function svgImg(svg: string, alt: string): string {
+  const b64 = Buffer.from(svg).toString('base64');
+  return `<img src="data:image/svg+xml;base64,${b64}" alt="${esc(alt)}">`;
 }
 
-/**
- * Dual-series area chart for CPU and Memory usage over time.
- * Returns raw SVG string (use svgImg to embed).
- */
-export function timelineChart(
-  cpuValues: number[],
-  memValues: number[],
-  opts: TimelineOpts = {},
-): string {
-  if (cpuValues.length < 2 && memValues.length < 2) return '';
+// ── Monotone Cubic Hermite Interpolation (Fritsch-Carlson) ──
 
-  const W        = opts.width ?? 600;
-  const H        = opts.height ?? 200;
-  const padTop   = 32;
-  const padRight = 12;
-  const padBot   = 30;
-  const padLeft  = 42;
-  const plotW    = W - padLeft - padRight;
-  const plotH    = H - padTop - padBot;
-  const nPoints  = opts.dataPoints ?? 80;
+interface Point { x: number; y: number }
 
-  function toPoints(values: number[]): Array<{ x: number; y: number }> {
-    const rs = resample(values, nPoints);
-    return rs.map((v, i) => ({
-      x: padLeft + (i / Math.max(rs.length - 1, 1)) * plotW,
-      y: padTop + plotH - (Math.min(Math.max(v, 0), 100) / 100) * plotH,
-    }));
+function monotoneCubicPath(pts: Point[]): string {
+  if (pts.length === 0) return '';
+  if (pts.length === 1) return `M${pts[0].x},${pts[0].y}`;
+  if (pts.length === 2)
+    return `M${pts[0].x},${pts[0].y}L${pts[1].x},${pts[1].y}`;
+
+  const n = pts.length;
+
+  // Step 1: compute secant slopes (delta_k)
+  const delta: number[] = [];
+  const h: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    h.push(pts[i + 1].x - pts[i].x);
+    delta.push(h[i] !== 0 ? (pts[i + 1].y - pts[i].y) / h[i] : 0);
   }
 
-  function areaPath(points: Array<{ x: number; y: number }>): string {
-    if (points.length === 0) return '';
-    const baseline = padTop + plotH;
-    return polylinePath(points) +
-      ` L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)}` +
-      ` L${points[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
-  }
-
-  const cpuPts = cpuValues.length >= 2 ? toPoints(cpuValues) : [];
-  const memPts = memValues.length >= 2 ? toPoints(memValues) : [];
-
-  // Grid lines at 0%, 25%, 50%, 75%, 100%
-  const gridLines: string[] = [];
-  for (const pct of [0, 25, 50, 75, 100]) {
-    const y = padTop + plotH - (pct / 100) * plotH;
-    gridLines.push(
-      `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${W - padRight}" y2="${y.toFixed(1)}" stroke="var(--grid)" stroke-width="1"/>`,
-    );
-    gridLines.push(
-      `<text x="${padLeft - 6}" y="${(y + 4).toFixed(1)}" fill="var(--muted)" font-size="10" text-anchor="end">${pct}%</text>`,
-    );
-  }
-
-  // X-axis labels (start / middle / end)
-  const totalSamples = Math.max(cpuValues.length, memValues.length);
-  const xLabels = [
-    `<text x="${padLeft}" y="${H - 6}" fill="var(--muted)" font-size="10" text-anchor="start">0</text>`,
-    `<text x="${padLeft + plotW / 2}" y="${H - 6}" fill="var(--muted)" font-size="10" text-anchor="middle">${Math.round(totalSamples / 2)}</text>`,
-    `<text x="${padLeft + plotW}" y="${H - 6}" fill="var(--muted)" font-size="10" text-anchor="end">${totalSamples}</text>`,
-  ];
-
-  // Legend
-  const cpuAvgLabel = opts.cpuAvg !== undefined ? ` ${opts.cpuAvg.toFixed(0)}% avg` : '';
-  const memAvgLabel = opts.memAvg !== undefined ? ` ${opts.memAvg.toFixed(0)}% avg` : '';
-  const legend = [
-    `<rect x="${padLeft}" y="8" width="10" height="10" rx="2" fill="var(--cpu-stroke)"/>`,
-    `<text x="${padLeft + 14}" y="17" fill="var(--fg)" font-size="11" font-weight="600">CPU${escapeXml(cpuAvgLabel)}</text>`,
-    `<rect x="${padLeft + 120}" y="8" width="10" height="10" rx="2" fill="var(--mem-stroke)"/>`,
-    `<text x="${padLeft + 134}" y="17" fill="var(--fg)" font-size="11" font-weight="600">Memory${escapeXml(memAvgLabel)}</text>`,
-  ];
-
-  // Series paths
-  const memArea = memPts.length > 0
-    ? `<path d="${areaPath(memPts)}" fill="var(--mem-fill)"/><path d="${polylinePath(memPts)}" fill="none" stroke="var(--mem-stroke)" stroke-width="2"/>`
-    : '';
-  const cpuArea = cpuPts.length > 0
-    ? `<path d="${areaPath(cpuPts)}" fill="var(--cpu-fill)"/><path d="${polylinePath(cpuPts)}" fill="none" stroke="var(--cpu-stroke)" stroke-width="2"/>`
-    : '';
-
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
-    `<defs>${themeStyles()}</defs>`,
-    `<rect width="${W}" height="${H}" rx="6" fill="var(--bg)"/>`,
-    ...gridLines,
-    ...xLabels,
-    memArea,
-    cpuArea,
-    ...legend,
-    `</svg>`,
-  ].join('');
-}
-
-// ── Per-Step Horizontal Bar Chart ───────────────────────────
-
-export interface StepBarData {
-  name: string;
-  value: number;
-}
-
-export interface StepBarOpts {
-  width?: number;
-  barHeight?: number;
-  formatValue?: (v: number) => string;
-}
-
-/**
- * Horizontal bar chart for per-step metrics. Returns raw SVG string.
- */
-export function stepBarChart(steps: StepBarData[], opts: StepBarOpts = {}): string {
-  if (steps.length === 0) return '';
-
-  const W         = opts.width ?? 600;
-  const barH      = opts.barHeight ?? 24;
-  const gap       = 6;
-  const padTop    = 8;
-  const padBot    = 8;
-  const padLeft   = 160;
-  const padRight  = 60;
-  const barAreaW  = W - padLeft - padRight;
-  const H         = padTop + steps.length * (barH + gap) - gap + padBot;
-
-  const maxVal = Math.max(...steps.map((s) => s.value), 1);
-  const fmt = opts.formatValue ?? ((v: number) => String(v));
-
-  const bars: string[] = [];
-  for (let i = 0; i < steps.length; i++) {
-    const y = padTop + i * (barH + gap);
-    const s = steps[i];
-    const barW = Math.max((s.value / maxVal) * barAreaW, 2);
-    const name = s.name.length > 22 ? s.name.slice(0, 21) + '\u2026' : s.name;
-
-    // Step name label
-    bars.push(
-      `<text x="${padLeft - 8}" y="${(y + barH / 2 + 4).toFixed(1)}" fill="var(--fg)" font-size="12" text-anchor="end">${escapeXml(name)}</text>`,
-    );
-    // Background bar
-    bars.push(
-      `<rect x="${padLeft}" y="${y}" width="${barAreaW}" height="${barH}" rx="4" fill="var(--bar-bg)"/>`,
-    );
-    // Value bar
-    bars.push(
-      `<rect x="${padLeft}" y="${y}" width="${barW.toFixed(1)}" height="${barH}" rx="4" fill="var(--bar-fill)"/>`,
-    );
-    // Value label
-    bars.push(
-      `<text x="${(padLeft + barW + 6).toFixed(1)}" y="${(y + barH / 2 + 4).toFixed(1)}" fill="var(--muted)" font-size="11">${escapeXml(fmt(s.value))}</text>`,
-    );
-  }
-
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
-    `<defs>${themeStyles()}</defs>`,
-    `<rect width="${W}" height="${H}" rx="6" fill="var(--bg)"/>`,
-    ...bars,
-    `</svg>`,
-  ].join('');
-}
-
-// ── Stat Cards ──────────────────────────────────────────────
-
-export interface StatCardItem {
-  label: string;
-  value: string;
-  sub?: string;
-  colorVar?: string;  // CSS var name without --, e.g. 'accent-blue'
-}
-
-export interface StatCardOpts {
-  width?: number;
-}
-
-/**
- * Row of stat cards with colored accent bar. Returns raw SVG string.
- */
-export function statCards(items: StatCardItem[], opts: StatCardOpts = {}): string {
-  if (items.length === 0) return '';
-
-  const W      = opts.width ?? 600;
-  const padO   = 6;
-  const gap    = 8;
-  const cols   = items.length;
-  const cardW  = (W - padO * 2 - gap * (cols - 1)) / cols;
-  const cardH  = 64;
-  const H      = cardH + padO * 2;
-
-  const els: string[] = [];
-  for (let i = 0; i < cols; i++) {
-    const item = items[i];
-    const x = padO + i * (cardW + gap);
-    const colorRef = item.colorVar ? `var(--${item.colorVar})` : 'var(--accent-blue)';
-
-    // Card background
-    els.push(`<rect x="${x}" y="${padO}" width="${cardW}" height="${cardH}" rx="6" fill="var(--bg-card)" stroke="var(--grid)" stroke-width="0.5"/>`);
-    // Accent bar
-    els.push(`<rect x="${x}" y="${padO}" width="${cardW}" height="3" rx="6" fill="${colorRef}" opacity="0.7"/>`);
-    // Value (scale font down for long text)
-    const valFontSize = item.value.length > 14 ? 11 : item.value.length > 10 ? 13 : 16;
-    els.push(`<text x="${x + cardW / 2}" y="${padO + 30}" fill="${colorRef}" font-size="${valFontSize}" font-weight="700" text-anchor="middle">${escapeXml(item.value)}</text>`);
-    // Label
-    els.push(`<text x="${x + cardW / 2}" y="${padO + 45}" fill="var(--muted)" font-size="9" text-anchor="middle">${escapeXml(item.label)}</text>`);
-    // Sub-label
-    if (item.sub) {
-      els.push(`<text x="${x + cardW / 2}" y="${padO + 57}" fill="var(--muted)" font-size="8" text-anchor="middle" opacity="0.6">${escapeXml(item.sub)}</text>`);
-    }
-  }
-
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
-    `<defs>${themeStyles()}</defs>`,
-    ...els,
-    `</svg>`,
-  ].join('');
-}
-
-// ── Waterfall Chart (Execution Timeline) ─────────────────────
-
-export interface WaterfallStep {
-  label: string;
-  startSec: number;
-  durationSec: number;
-  group?: string;       // job name — determines bar color
-}
-
-export interface WaterfallOpts {
-  width?: number;
-  barHeight?: number;
-  title?: string;
-  formatDuration?: (s: number) => string;
-}
-
-/**
- * Waterfall/Gantt chart showing step execution times, grouped by job.
- * Each bar is positioned by start time with width proportional to duration.
- * Jobs are visually grouped with background bands, colored accent bars,
- * and a job name label in the left margin.
- * Returns raw SVG string.
- */
-export function waterfallChart(steps: WaterfallStep[], opts: WaterfallOpts = {}): string {
-  if (steps.length === 0) return '';
-
-  const W      = opts.width ?? 600;
-  const barH   = opts.barHeight ?? 22;
-  const padL   = 8;
-  const padR   = 8;
-  const padTop = opts.title ? 28 : 8;
-  const gap    = 2;
-  const jobLabelW = 56;   // left margin for job name
-  const stepLabelW = 110; // step name area
-  const durW   = 55;
-  const barArea = W - jobLabelW - stepLabelW - durW - padL - padR;
-  const barLeft = padL + jobLabelW + stepLabelW;
-  const fmt    = opts.formatDuration ?? fmtDuration;
-
-  const totalEnd = Math.max(...steps.map(s => s.startSec + s.durationSec), 1);
-
-  // Assign colors per group (job name)
-  const groupColors = ['accent-blue', 'accent-purple', 'accent-cyan', 'accent-green'];
-  const groupMap = new Map<string, string>();
-  let colorIdx = 0;
-  for (const s of steps) {
-    const g = s.group ?? '';
-    if (g && !groupMap.has(g)) {
-      groupMap.set(g, groupColors[colorIdx % groupColors.length]);
-      colorIdx++;
-    }
-  }
-
-  // Identify group spans (start index, count)
-  const groups: Array<{ name: string; start: number; count: number; colorVar: string }> = [];
-  let prevGroup: string | null = null;
-  for (let i = 0; i < steps.length; i++) {
-    const g = steps[i].group ?? '';
-    if (g !== prevGroup) {
-      groups.push({ name: g, start: i, count: 1, colorVar: groupMap.get(g) ?? 'accent-blue' });
-      prevGroup = g;
+  // Step 2: initialize tangents
+  const m: number[] = new Array(n);
+  m[0] = delta[0];
+  m[n - 1] = delta[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (delta[i - 1] * delta[i] <= 0) {
+      m[i] = 0;
     } else {
-      groups[groups.length - 1].count++;
+      m[i] = (delta[i - 1] + delta[i]) / 2;
     }
   }
 
-  // Compute group separators spacing
-  const groupGap = 6; // extra space between groups
-  // Compute y position accounting for group gaps
-  function stepY(idx: number): number {
-    let y = padTop;
-    let gapsAbove = 0;
-    for (const g of groups) {
-      if (idx < g.start) break;
-      if (g.start > 0 && idx >= g.start) gapsAbove++;
-    }
-    // Subtract 1 because first group doesn't get a gap
-    gapsAbove = Math.max(0, gapsAbove - 1);
-    y += idx * (barH + gap) + gapsAbove * groupGap;
-    return y;
-  }
-
-  const lastStep = steps.length - 1;
-  const H = stepY(lastStep) + barH + 8;
-
-  const els: string[] = [];
-
-  // Title
-  if (opts.title) {
-    els.push(`<text x="${padL + 4}" y="18" fill="var(--muted)" font-size="10">${escapeXml(opts.title)}</text>`);
-  }
-
-  // Draw group background bands, accent bars, and job labels
-  for (let gi = 0; gi < groups.length; gi++) {
-    const g = groups[gi];
-    const yStart = stepY(g.start) - 1;
-    const yEnd = stepY(g.start + g.count - 1) + barH + 1;
-    const bandH = yEnd - yStart;
-
-    // Alternating subtle background band
-    if (gi % 2 === 1) {
-      els.push(
-        `<rect x="0" y="${yStart.toFixed(1)}" width="${W}" height="${bandH.toFixed(1)}" fill="var(--group-band)"/>`,
-      );
-    }
-
-    // Colored accent bar on the left edge
-    els.push(
-      `<rect x="${padL}" y="${yStart.toFixed(1)}" width="3" height="${bandH.toFixed(1)}" rx="1.5" fill="var(--${g.colorVar})" opacity="0.6"/>`,
-    );
-
-    // Job name label (vertically centered in group)
-    const labelY = yStart + bandH / 2;
-    const jobName = g.name.length > 8 ? g.name.slice(0, 7) + '\u2026' : g.name;
-    els.push(
-      `<text x="${padL + 8}" y="${labelY.toFixed(1)}" fill="var(--${g.colorVar})" font-size="9" font-weight="600" dominant-baseline="middle">${escapeXml(jobName)}</text>`,
-    );
-
-    // Separator line between groups
-    if (gi > 0) {
-      const sepY = yStart - groupGap / 2;
-      els.push(
-        `<line x1="${padL}" y1="${sepY.toFixed(1)}" x2="${W - padR}" y2="${sepY.toFixed(1)}" stroke="var(--grid)" stroke-width="0.5" opacity="0.4"/>`,
-      );
-    }
-  }
-
-  // Draw step rows
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
-    const y = stepY(i);
-    const bx = barLeft + (step.startSec / totalEnd) * barArea;
-    const bw = Math.max(2, (step.durationSec / totalEnd) * barArea);
-    const colorVar = step.group ? (groupMap.get(step.group) ?? 'accent-blue') : 'accent-blue';
-
-    // Step name (strip "job · " prefix if present — job is shown in left margin)
-    let stepName = step.label;
-    if (step.group && stepName.startsWith(step.group + ' · ')) {
-      stepName = stepName.slice(step.group.length + 3);
-    }
-    stepName = stepName.length > 16 ? stepName.slice(0, 15) + '\u2026' : stepName;
-
-    // Step name
-    els.push(
-      `<text x="${padL + jobLabelW}" y="${(y + barH / 2 + 1).toFixed(1)}" fill="var(--fg)" font-size="9.5" dominant-baseline="middle">${escapeXml(stepName)}</text>`,
-    );
-    // Background track
-    els.push(
-      `<rect x="${barLeft}" y="${(y + 3).toFixed(1)}" width="${barArea}" height="${barH - 6}" rx="2" fill="var(--grid-subtle)" opacity="0.5"/>`,
-    );
-    // Duration bar
-    els.push(
-      `<rect x="${bx.toFixed(1)}" y="${(y + 3).toFixed(1)}" width="${bw.toFixed(1)}" height="${barH - 6}" rx="2" fill="var(--${colorVar})" opacity="0.85"/>`,
-    );
-    // Duration text
-    els.push(
-      `<text x="${W - padR - 4}" y="${(y + barH / 2 + 1).toFixed(1)}" fill="var(--muted)" font-size="9.5" text-anchor="end" dominant-baseline="middle">${escapeXml(fmt(step.durationSec))}</text>`,
-    );
-  }
-
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
-    `<defs>${themeStyles()}</defs>`,
-    `<rect width="${W}" height="${H}" rx="6" fill="var(--bg-card)"/>`,
-    ...els,
-    `</svg>`,
-  ].join('');
-}
-
-// ── Workflow Timeline Chart ──────────────────────────────────
-
-export interface TimelineSegment {
-  label: string;       // job name
-  values: number[];    // raw values for this segment
-  startedAt?: string;  // ISO timestamp for X-axis labels
-  endedAt?: string;    // ISO timestamp for X-axis labels
-}
-
-export interface WorkflowTimelineOpts {
-  width?: number;
-  height?: number;
-  color: string;          // CSS var name, e.g. 'cpu-stroke'
-  fillColor: string;      // CSS var name, e.g. 'cpu-fill'
-  yMax: number;           // maximum Y value (100 for CPU%, totalMB for memory)
-  yFormat?: (v: number) => string;  // Y-axis label formatter
-  title?: string;         // e.g. "CPU Usage" or "Memory Usage"
-  dataPoints?: number;
-}
-
-/**
- * Single-series area chart with smooth curves, gradient fill,
- * and job segment dividers. Returns raw SVG string.
- */
-export function workflowTimelineChart(
-  segments: TimelineSegment[],
-  opts: WorkflowTimelineOpts,
-): string {
-  const rawValues = segments.flatMap(s => s.values);
-  if (rawValues.length < 2) return '';
-
-  const hasTimestamps = segments.every(s => s.startedAt && s.endedAt);
-  const W        = opts.width ?? 600;
-  const padTop   = 28;
-  const padRight = 12;
-  const padBot   = hasTimestamps ? 36 : 24;
-  const padLeft  = 52;
-  const H        = opts.height ?? (hasTimestamps ? 172 : 160);
-  const plotW    = W - padLeft - padRight;
-  const plotH    = H - padTop - padBot;
-  const nPoints  = opts.dataPoints ?? 80;
-  const yMax     = opts.yMax > 0 ? opts.yMax : 1;
-  const yFormat  = opts.yFormat ?? ((v: number) => v.toFixed(0));
-  const gradId   = `grad_${opts.color.replace(/[^a-z]/g, '')}`;
-
-  // When timestamps are available, resample each segment proportionally
-  // to its real duration so the X-axis is time-proportional.
-  let allValues: number[];
-  let segBoundaries: number[]; // cumulative sample index where each segment starts
-  if (hasTimestamps) {
-    const durations = segments.map(s => {
-      const start = new Date(s.startedAt!).getTime();
-      const end = new Date(s.endedAt!).getTime();
-      return Math.max(end - start, 1);
-    });
-    const totalDur = durations.reduce((a, b) => a + b, 0);
-    allValues = [];
-    segBoundaries = [0];
-    for (let i = 0; i < segments.length; i++) {
-      const segPoints = Math.max(2, Math.round((durations[i] / totalDur) * nPoints));
-      const resampled = resample(segments[i].values, segPoints);
-      allValues.push(...resampled);
-      segBoundaries.push(allValues.length);
-    }
-  } else {
-    allValues = rawValues;
-    segBoundaries = [0];
-    let cum = 0;
-    for (const s of segments) { cum += s.values.length; segBoundaries.push(cum); }
-  }
-
-  // Resample combined values to final point count
-  const rs = resample(allValues, nPoints);
-
-  // Map segment boundaries to resampled index space
-  const totalLen = allValues.length;
-  const rsSegBoundaries = segBoundaries.map(b =>
-    Math.round((b / Math.max(totalLen, 1)) * (rs.length - 1)),
-  );
-
-  // Map resampled values to SVG points
-  const points = rs.map((v, i) => ({
-    x: padLeft + (i / Math.max(rs.length - 1, 1)) * plotW,
-    y: padTop + plotH - (Math.min(Math.max(v, 0), yMax) / yMax) * plotH,
-  }));
-
-  // Smooth bezier line path
-  const linePath = smoothPath(points);
-
-  // Area path (smooth line → baseline → close)
-  const baseline = padTop + plotH;
-  const areaD = linePath +
-    ` L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)}` +
-    ` L${points[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
-
-  // Gradient definition
-  const gradDef =
-    `<linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">` +
-    `<stop offset="0%" stop-color="var(--${opts.color})" stop-opacity="0.3"/>` +
-    `<stop offset="100%" stop-color="var(--${opts.color})" stop-opacity="0.02"/>` +
-    `</linearGradient>`;
-
-  // Grid lines — 3 subtle lines
-  const gridLines: string[] = [];
-  const gridSteps = 4;
-  for (let i = 0; i <= gridSteps; i++) {
-    const frac = i / gridSteps;
-    const val = frac * yMax;
-    const y = padTop + plotH - frac * plotH;
-    gridLines.push(
-      `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${W - padRight}" y2="${y.toFixed(1)}" stroke="var(--grid-subtle)" stroke-width="0.5"/>`,
-    );
-    gridLines.push(
-      `<text x="${padLeft - 6}" y="${(y + 3).toFixed(1)}" fill="var(--muted)" font-size="9" text-anchor="end">${escapeXml(yFormat(val))}</text>`,
-    );
-  }
-
-  // Job segment dividers, job labels, and time axis
-  const dividers: string[] = [];
-  const maxIdx = Math.max(rs.length - 1, 1);
-  for (let si = 0; si < segments.length; si++) {
-    const segStartIdx = rsSegBoundaries[si];
-    const segEndIdx = rsSegBoundaries[si + 1];
-
-    // Dashed divider line at segment boundary
-    if (si > 0) {
-      const xPos = padLeft + (segStartIdx / maxIdx) * plotW;
-      dividers.push(
-        `<line x1="${xPos.toFixed(1)}" y1="${padTop}" x2="${xPos.toFixed(1)}" y2="${(padTop + plotH).toFixed(1)}" stroke="var(--muted)" stroke-width="0.5" stroke-dasharray="4,3" opacity="0.6"/>`,
-      );
-    }
-
-    // Job name label centered within segment
-    const segMidIdx = (segStartIdx + segEndIdx) / 2;
-    const xLabel = padLeft + (segMidIdx / maxIdx) * plotW;
-    const name = segments[si].label.length > 16 ? segments[si].label.slice(0, 15) + '\u2026' : segments[si].label;
-    dividers.push(
-      `<text x="${xLabel.toFixed(1)}" y="${H - (hasTimestamps ? 14 : 5)}" fill="var(--muted)" font-size="9" text-anchor="middle">${escapeXml(name)}</text>`,
-    );
-  }
-
-  // Time axis labels (from segment timestamps)
-  if (hasTimestamps) {
-    // Start time of first segment
-    dividers.push(
-      `<text x="${padLeft}" y="${H - 4}" fill="var(--muted)" font-size="8" text-anchor="start">${escapeXml(fmtTime(segments[0].startedAt!))}</text>`,
-    );
-    // End time of last segment
-    dividers.push(
-      `<text x="${(W - padRight)}" y="${H - 4}" fill="var(--muted)" font-size="8" text-anchor="end">${escapeXml(fmtTime(segments[segments.length - 1].endedAt!))}</text>`,
-    );
-    // Divider timestamps (start of each segment after the first)
-    for (let si = 1; si < segments.length; si++) {
-      if (segments[si].startedAt) {
-        const xPos = padLeft + (rsSegBoundaries[si] / maxIdx) * plotW;
-        dividers.push(
-          `<text x="${xPos.toFixed(1)}" y="${H - 4}" fill="var(--muted)" font-size="8" text-anchor="middle">${escapeXml(fmtTime(segments[si].startedAt!))}</text>`,
-        );
+  // Step 3: Fritsch-Carlson monotonicity constraint
+  for (let i = 0; i < n - 1; i++) {
+    if (delta[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+    } else {
+      const alpha = m[i] / delta[i];
+      const beta = m[i + 1] / delta[i];
+      const tau = alpha * alpha + beta * beta;
+      if (tau > 9) {
+        const s = 3 / Math.sqrt(tau);
+        m[i] = s * alpha * delta[i];
+        m[i + 1] = s * beta * delta[i];
       }
     }
   }
 
-  // Endpoint dot with glow
-  const lastPt = points[points.length - 1];
-  const endDot = [
-    `<circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="4" fill="var(--${opts.color})" opacity="0.3"/>`,
-    `<circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="2.5" fill="var(--${opts.color})"/>`,
-  ];
+  // Step 4: build SVG cubic bezier path
+  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const dx = (pts[i + 1].x - pts[i].x) / 3;
+    const cp1x = pts[i].x + dx;
+    const cp1y = pts[i].y + m[i] * dx;
+    const cp2x = pts[i + 1].x - dx;
+    const cp2y = pts[i + 1].y - m[i + 1] * dx;
+    d +=
+      `C${cp1x.toFixed(1)},${cp1y.toFixed(1)},` +
+      `${cp2x.toFixed(1)},${cp2y.toFixed(1)},` +
+      `${pts[i + 1].x.toFixed(1)},${pts[i + 1].y.toFixed(1)}`;
+  }
+  return d;
+}
 
-  // Title + current value
-  const lastVal = rs[rs.length - 1];
-  const titleEl = opts.title
-    ? `<text x="${padLeft}" y="16" fill="var(--muted)" font-size="10">${escapeXml(opts.title)}</text>`
-    : '';
-  const valEl = opts.title
-    ? `<text x="${W - padRight}" y="16" fill="var(--${opts.color})" font-size="10" text-anchor="end">${escapeXml(yFormat(lastVal))}</text>`
+// ── Stat Cards ───────────────────────────────────────────────
+
+export interface StatCard {
+  label: string;
+  value: string;
+  sub?: string;
+  color: string;
+}
+
+export function renderStatCards(cards: StatCard[]): string {
+  const count = cards.length;
+  const cardW = 180;
+  const gap = 12;
+  const totalW = count * cardW + (count - 1) * gap;
+  const h = 96;
+  const padX = 16;
+
+  const rects = cards
+    .map((c, i) => {
+      const x = i * (cardW + gap);
+      return `
+    <rect x="${x}" y="0" width="${cardW}" height="${h}" rx="6"
+          fill="${CARD}" stroke="${BORDER}" stroke-width="1"/>
+    <rect x="${x}" y="0" width="${cardW}" height="3" rx="6"
+          fill="${c.color}"/>
+    <text x="${x + padX}" y="32" fill="${MUTED}"
+          font-size="11" font-family="${FONT}">${esc(c.label)}</text>
+    <text x="${x + padX}" y="58" fill="${TEXT}"
+          font-size="20" font-weight="bold" font-family="${FONT}">${esc(c.value)}</text>
+    ${c.sub ? `<text x="${x + padX}" y="78" fill="${MUTED}" font-size="11" font-family="${FONT}">${esc(c.sub)}</text>` : ''}`;
+    })
+    .join('');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${h}"
+  viewBox="0 0 ${totalW} ${h}" role="img">
+  <rect width="${totalW}" height="${h}" fill="${BG}" rx="8"/>
+  ${rects}
+</svg>`;
+}
+
+// ── Area Chart ───────────────────────────────────────────────
+
+export interface AreaChartOpts {
+  title: string;
+  values: number[];
+  color: string;
+  yLabel: string;
+  startedAt: string;
+  endedAt: string;
+  currentValue?: string;
+  steps?: { name: string; startedAt: string }[];
+  formatY?: (v: number) => string;
+}
+
+export function renderAreaChart(opts: AreaChartOpts): string {
+  const {
+    title,
+    values,
+    color,
+    yLabel,
+    startedAt,
+    endedAt,
+    currentValue,
+    steps,
+    formatY = (v) => v.toFixed(0),
+  } = opts;
+
+  const W = 760;
+  const H = 220;
+  const pad = { top: 40, right: 20, bottom: 40, left: 52 };
+  const chartW = W - pad.left - pad.right;
+  const chartH = H - pad.top - pad.bottom;
+
+  // Y-axis range
+  const yMax = Math.max(...values, 1) * 1.15;
+  const yMin = 0;
+
+  // Scale helpers
+  const sx = (i: number) =>
+    pad.left + (i / Math.max(values.length - 1, 1)) * chartW;
+  const sy = (v: number) =>
+    pad.top + chartH - ((v - yMin) / (yMax - yMin)) * chartH;
+
+  // Build data points
+  const pts: Point[] = values.map((v, i) => ({ x: sx(i), y: sy(v) }));
+  const curvePath = monotoneCubicPath(pts);
+
+  // Fill path (close to bottom)
+  const fillPath =
+    curvePath +
+    `L${pts[pts.length - 1].x.toFixed(1)},${(pad.top + chartH).toFixed(1)}` +
+    `L${pts[0].x.toFixed(1)},${(pad.top + chartH).toFixed(1)}Z`;
+
+  // Gradient ID
+  const gradId = `grad-${color.replace('#', '')}`;
+
+  // Grid lines (4 horizontal)
+  const gridLines: string[] = [];
+  const yLabels: string[] = [];
+  for (let i = 0; i <= 4; i++) {
+    const val = yMin + ((yMax - yMin) * i) / 4;
+    const y = sy(val);
+    gridLines.push(
+      `<line x1="${pad.left}" y1="${y.toFixed(1)}" x2="${W - pad.right}" y2="${y.toFixed(1)}" stroke="${GRID}" stroke-width="1"/>`,
+    );
+    yLabels.push(
+      `<text x="${pad.left - 8}" y="${(y + 4).toFixed(1)}" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(formatY(val))}</text>`,
+    );
+  }
+
+  // Step separators
+  const stepSeparators: string[] = [];
+  if (steps && steps.length > 0) {
+    const totalStart = new Date(startedAt).getTime();
+    const totalEnd = new Date(endedAt).getTime();
+    const totalDur = totalEnd - totalStart || 1;
+
+    for (const step of steps) {
+      const stepStart = new Date(step.startedAt).getTime();
+      const frac = (stepStart - totalStart) / totalDur;
+      if (frac <= 0.01 || frac >= 0.99) continue;
+      const x = pad.left + frac * chartW;
+      stepSeparators.push(
+        `<line x1="${x.toFixed(1)}" y1="${pad.top}" x2="${x.toFixed(1)}" y2="${pad.top + chartH}" stroke="${BORDER}" stroke-width="1" stroke-dasharray="4,3"/>`,
+      );
+      stepSeparators.push(
+        `<text x="${(x + 4).toFixed(1)}" y="${pad.top - 4}" fill="${MUTED}" font-size="9" font-family="${FONT}" transform="rotate(-30,${(x + 4).toFixed(1)},${pad.top - 4})">${esc(truncate(step.name, 18))}</text>`,
+      );
+    }
+  }
+
+  // X-axis labels (start + end time)
+  const xLabels = `
+    <text x="${pad.left}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}">${esc(fmtTime(startedAt))}</text>
+    <text x="${W - pad.right}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(fmtTime(endedAt))}</text>`;
+
+  // Title + current value annotation
+  const titleText = `<text x="${pad.left}" y="24" fill="${TEXT}" font-size="14" font-weight="bold" font-family="${FONT}">${esc(title)}</text>`;
+  const valueAnnotation = currentValue
+    ? `<text x="${W - pad.right}" y="24" fill="${color}" font-size="13" font-family="${FONT}" text-anchor="end">${esc(currentValue)}</text>`
     : '';
 
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
-    `<defs>${themeStyles()}${gradDef}</defs>`,
-    `<rect width="${W}" height="${H}" rx="6" fill="var(--bg-card)"/>`,
-    ...gridLines,
-    ...dividers,
-    `<path d="${areaD}" fill="url(#${gradId})"/>`,
-    `<path d="${linePath}" fill="none" stroke="var(--${opts.color})" stroke-width="1.5" stroke-linecap="round"/>`,
-    ...endDot,
-    titleEl,
-    valEl,
-    `</svg>`,
-  ].join('');
+  // Endpoint glow dot
+  const lastPt = pts[pts.length - 1];
+  const glowDot = lastPt
+    ? `<circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="4" fill="${color}" opacity="0.6"/>
+       <circle cx="${lastPt.x.toFixed(1)}" cy="${lastPt.y.toFixed(1)}" r="2" fill="${color}"/>`
+    : '';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"
+  viewBox="0 0 ${W} ${H}" role="img">
+  <defs>
+    <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="${color}" stop-opacity="0.05"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="${BG}" rx="8"/>
+  ${titleText}
+  ${valueAnnotation}
+  ${gridLines.join('\n  ')}
+  ${yLabels.join('\n  ')}
+  ${stepSeparators.join('\n  ')}
+  <path d="${fillPath}" fill="url(#${gradId})"/>
+  <path d="${curvePath}" fill="none" stroke="${color}" stroke-width="2"/>
+  ${glowDot}
+  ${xLabels}
+  <text x="${pad.left + chartW / 2}" y="${H - 6}" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="middle">${esc(yLabel)}</text>
+</svg>`;
+}
+
+// ── Gantt / Timeline Chart ───────────────────────────────────
+
+export interface GanttStep {
+  name: string;
+  startedAt: string;
+  completedAt: string;
+  durationSec: number;
+  color: string;
+}
+
+export interface GanttChartOpts {
+  steps: GanttStep[];
+  totalStartedAt: string;
+  totalEndedAt: string;
+}
+
+const GANTT_COLORS = [GREEN, BLUE, PURPLE, '#f0883e', '#f778ba', '#79c0ff', '#d2a8ff', '#7ee787'];
+
+export function pickGanttColor(index: number): string {
+  return GANTT_COLORS[index % GANTT_COLORS.length];
+}
+
+export function renderGanttChart(opts: GanttChartOpts): string {
+  const { steps, totalStartedAt, totalEndedAt } = opts;
+
+  const rowH = 32;
+  const nameColW = 180;
+  const durColW = 64;
+  const barPad = 12;
+  const pad = { top: 40, right: 16, bottom: 16, left: 12 };
+  const barAreaW = 760 - pad.left - nameColW - barPad - durColW - pad.right;
+  const H = pad.top + steps.length * rowH + pad.bottom;
+  const W = 760;
+
+  const totalStart = new Date(totalStartedAt).getTime();
+  const totalEnd = new Date(totalEndedAt).getTime();
+  const totalDur = totalEnd - totalStart || 1;
+
+  const rows = steps
+    .map((step, i) => {
+      const y = pad.top + i * rowH;
+      const barX = pad.left + nameColW + barPad;
+
+      const sStart = new Date(step.startedAt).getTime();
+      const sEnd = new Date(step.completedAt).getTime();
+      const fracStart = Math.max(0, (sStart - totalStart) / totalDur);
+      const fracEnd = Math.min(1, (sEnd - totalStart) / totalDur);
+      const barW = Math.max(4, (fracEnd - fracStart) * barAreaW);
+      const barOffset = fracStart * barAreaW;
+
+      return `
+    <rect x="${barX}" y="${(y + 8).toFixed(0)}" width="${barAreaW}" height="16" rx="4" fill="${GRID}" opacity="0.5"/>
+    <rect x="${(barX + barOffset).toFixed(1)}" y="${(y + 8).toFixed(0)}" width="${barW.toFixed(1)}" height="16" rx="4" fill="${step.color}" opacity="0.85"/>
+    <text x="${pad.left + 4}" y="${(y + 21).toFixed(0)}" fill="${TEXT}" font-size="11" font-family="${FONT}">${esc(truncate(step.name, 24))}</text>
+    <text x="${W - pad.right}" y="${(y + 21).toFixed(0)}" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(fmtDuration(step.durationSec))}</text>`;
+    })
+    .join('');
+
+  const titleText = `<text x="${pad.left + 4}" y="24" fill="${TEXT}" font-size="14" font-weight="bold" font-family="${FONT}">Execution Timeline</text>`;
+  const timeLabels = `
+    <text x="${pad.left + nameColW + barPad}" y="24" fill="${MUTED}" font-size="10" font-family="${FONT}">${esc(fmtTime(totalStartedAt))}</text>
+    <text x="${pad.left + nameColW + barPad + barAreaW}" y="24" fill="${MUTED}" font-size="10" font-family="${FONT}" text-anchor="end">${esc(fmtTime(totalEndedAt))}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"
+  viewBox="0 0 ${W} ${H}" role="img">
+  <rect width="${W}" height="${H}" fill="${BG}" rx="8"/>
+  ${titleText}
+  ${timeLabels}
+  ${rows}
+</svg>`;
 }

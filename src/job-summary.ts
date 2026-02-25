@@ -280,7 +280,7 @@ function buildChartConfig(
     options: {
       plugins: {
         legend: hasExtra
-          ? { display: true, labels: { boxHeight: 0, boxWidth: 24, font: { size: 10 } } }
+          ? { display: true, labels: { boxHeight: 0, boxWidth: 14, font: { size: 10 } } }
           : { display: false },
         title: {
           display: true,
@@ -360,7 +360,7 @@ data:{datasets:[
 ]},
 options:{
   plugins:{
-    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{boxHeight:0,boxWidth:24,font:{size:10}}" : ''}},
+    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{boxHeight:0,boxWidth:14,font:{size:10}}" : ''}},
     title:{display:true,text:'${title.replace(/'/g, "\\'")}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
     annotation:{annotations:{${anns.join(',')}}}
   },

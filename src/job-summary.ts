@@ -166,14 +166,14 @@ async function buildStatCardsImage(report: AggregatedReport): Promise<string> {
   const body = JSON.stringify({
     version: CHART_VERSION,
     backgroundColor: CHART_BG,
-    width: 760,
+    width: 1024,
     height: 100,
     devicePixelRatio: 2,
     format: 'png',
     chart: config,
   });
   const url = await postQuickChart(body);
-  return `<img src="${url}" alt="Runner Stats" width="760">`;
+  return `<img src="${url}" alt="Runner Stats" width="100%">`;
 }
 
 /** Markdown fallback if image rendering fails */
@@ -258,6 +258,7 @@ function buildChartConfig(
     fill: false,
     tension: 0.4,
     pointRadius: 0,
+    pointStyle: 'line' as const,
     borderWidth: 1.5,
     borderDash: [4, 3],
   }));
@@ -274,13 +275,14 @@ function buildChartConfig(
         fill: true,
         tension: 0.4,
         pointRadius: 0,
+        pointStyle: 'line' as const,
         borderWidth: 2,
       }, ...extraDS],
     },
     options: {
       plugins: {
         legend: hasExtra
-          ? { display: true, labels: { boxWidth: 20, boxHeight: 2, font: { size: 10 } } }
+          ? { display: true, labels: { usePointStyle: true, boxWidth: 20, font: { size: 10 } } }
           : { display: false },
         title: {
           display: true,
@@ -349,18 +351,18 @@ function buildSteppedChartString(
   }
 
   const extraDS = (extraLines ?? []).map(e =>
-    `{label:'${e.label.replace(/'/g, "\\'")}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,borderWidth:1.5,borderDash:[4,3],clip:false}`
+    `{label:'${e.label.replace(/'/g, "\\'")}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,pointStyle:'line',borderWidth:1.5,borderDash:[4,3],clip:false}`
   );
 
   /* eslint-disable no-useless-escape */
   return `{
 type:'line',
 data:{datasets:[
-  {label:'${extraDS.length > 0 ? 'total' : title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
+  {label:'${extraDS.length > 0 ? 'total' : title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,pointStyle:'line',borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
 ]},
 options:{
   plugins:{
-    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{boxWidth:20,boxHeight:2,font:{size:10}}" : ''}},
+    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{usePointStyle:true,boxWidth:20,font:{size:10}}" : ''}},
     title:{display:true,text:'${title.replace(/'/g, "\\'")}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
     annotation:{annotations:{${anns.join(',')}}}
   },
@@ -393,7 +395,7 @@ function buildChartUrl(config: Record<string, unknown>): string {
   const json = JSON.stringify(config);
   const encoded = encodeURIComponent(json);
   const bkg = encodeURIComponent(CHART_BG);
-  return `https://quickchart.io/chart?v=${CHART_VERSION}&c=${encoded}&w=760&h=250&bkg=${bkg}&f=png&devicePixelRatio=2`;
+  return `https://quickchart.io/chart?v=${CHART_VERSION}&c=${encoded}&w=1024&h=250&bkg=${bkg}&f=png&devicePixelRatio=2`;
 }
 
 interface ExtraLine {
@@ -463,14 +465,14 @@ async function buildQuickChart(
     const body = JSON.stringify({
       version: CHART_VERSION,
       backgroundColor: CHART_BG,
-      width: 760,
+      width: 1024,
       height: 300,
       devicePixelRatio: 2,
       format: 'png',
       chart: chartStr,
     });
     const url = await postQuickChart(body);
-    return `<img src="${url}" alt="${esc(title)}" width="760">`;
+    return `<img src="${url}" alt="${esc(title)}" width="100%">`;
   }
 
   // ── No steps: use category axis (supports compact GET URLs) ──
@@ -482,7 +484,7 @@ async function buildQuickChart(
     const body = JSON.stringify({
       version: CHART_VERSION,
       backgroundColor: CHART_BG,
-      width: 760,
+      width: 1024,
       height: 250,
       devicePixelRatio: 2,
       format: 'png',
@@ -494,7 +496,7 @@ async function buildQuickChart(
       // If POST fails, use long GET URL anyway
     }
   }
-  return `<img src="${url}" alt="${esc(title)}" width="760">`;
+  return `<img src="${url}" alt="${esc(title)}" width="100%">`;
 }
 
 // ── Gantt Timeline (QuickChart.io horizontal bar chart) ──────
@@ -588,7 +590,7 @@ async function buildGanttChart(ganttJob: GanttJob): Promise<string> {
   const body = JSON.stringify({
     version: CHART_VERSION,
     backgroundColor: CHART_BG,
-    width: 760,
+    width: 1024,
     height,
     devicePixelRatio: 2,
     format: 'png',
@@ -596,7 +598,7 @@ async function buildGanttChart(ganttJob: GanttJob): Promise<string> {
   });
 
   const url = await postQuickChart(body);
-  return `<img src="${url}" alt="Execution Timeline" width="760">`;
+  return `<img src="${url}" alt="Execution Timeline" width="100%">`;
 }
 
 /** Mermaid fallback if QuickChart fails */

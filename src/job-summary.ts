@@ -217,7 +217,14 @@ function timeLabels(startedAt: string, endedAt: string, count: number): string[]
 }
 
 const STEP_LINE_COLOR = '#d0d7de';
-const STEP_BAND_COLORS = ['rgba(0,0,0,0.04)', 'rgba(0,0,0,0)'];
+const STEP_BAND_COLORS = [
+  'rgba(47,129,247,0.10)',   // blue
+  'rgba(63,185,80,0.10)',    // green
+  'rgba(240,136,62,0.10)',   // orange
+  'rgba(130,80,223,0.10)',   // purple
+  'rgba(219,55,100,0.10)',   // pink
+  'rgba(31,111,139,0.10)',   // teal
+];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function buildChartConfig(
@@ -290,26 +297,35 @@ function buildSteppedChartString(
   const data = JSON.stringify(dataPoints);
   const yValues = dataPoints.map(p => p.y);
   const dataMax = yValues.length > 0 ? Math.max(...yValues) : 100;
-  const suggestedMax = dataMax * 1.25;
-  const labelY = dataMax * 1.1;
+  const suggestedMax = dataMax * 1.35;
   const xRange = xMax - xMin;
 
   const anns: string[] = [];
   for (let i = 0; i < steps.length; i++) {
     const m = steps[i];
     const name = m.name.replace(/'/g, "\\'");
-    const truncName = name.length > 16 ? name.slice(0, 13) + '...' : name;
+    const truncName = name.length > 20 ? name.slice(0, 17) + '...' : name;
 
-    // Alternating background band
-    anns.push(`sb${i}:{type:'box',xMin:${m.startMs},xMax:${m.endMs},backgroundColor:'${STEP_BAND_COLORS[i % 2]}',borderWidth:0,drawTime:'beforeDatasetsDraw'}`);
+    // Colored background band per step
+    anns.push(`sb${i}:{type:'box',xMin:${m.startMs},xMax:${m.endMs},backgroundColor:'${STEP_BAND_COLORS[i % STEP_BAND_COLORS.length]}',borderWidth:0,drawTime:'beforeDatasetsDraw'}`);
 
-    // Vertical line at step start
+    // Vertical dashed line at step start
     anns.push(`sl${i}:{type:'line',xMin:${m.startMs},xMax:${m.startMs},borderColor:'${STEP_LINE_COLOR}',borderWidth:1,borderDash:[4,4]}`);
 
-    // Step name label centered in band
+    // Step name label at top of chart, horizontal
     const midMs = (m.startMs + m.endMs) / 2;
-    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${labelY},content:['${truncName}'],color:'${TICK}',font:{size:8},rotation:-90,padding:2}`);
+    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${suggestedMax * 0.97},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},padding:{top:2,bottom:2,left:4,right:4},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
   }
+
+  // Collect unique tick values at step boundaries + chart edges
+  const tickSet = new Set<number>();
+  tickSet.add(xMin);
+  tickSet.add(xMax);
+  for (const m of steps) {
+    tickSet.add(m.startMs);
+    tickSet.add(m.endMs);
+  }
+  const forcedTicks = JSON.stringify([...tickSet].sort((a, b) => a - b));
 
   /* eslint-disable no-useless-escape */
   return `{
@@ -324,7 +340,8 @@ options:{
   scales:{
     x:{
       type:'linear',min:${xMin - xRange * 0.01},max:${xMax + xRange * 0.01},
-      ticks:{color:'${TICK}',font:{size:11},maxRotation:0,autoSkipPadding:20,
+      afterBuildTicks:function(axis){axis.ticks=${forcedTicks}.map(function(v){return {value:v}})},
+      ticks:{color:'${TICK}',font:{size:10},maxRotation:0,
         callback:function(val){if(val<${xMin}||val>${xMax})return '';var d=new Date(val);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+':'+d.getUTCSeconds().toString().padStart(2,'0')}
       },
       grid:{display:false},

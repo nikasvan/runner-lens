@@ -298,7 +298,8 @@ function buildSteppedChartString(
   const data = JSON.stringify(dataPoints);
   const yValues = dataPoints.map(p => p.y);
   const dataMax = yValues.length > 0 ? Math.max(...yValues) : 100;
-  const chartYMax = yMax ?? dataMax * 1.15;
+  // Add 5% headroom so data at the max isn't clipped by the chart edge
+  const chartYMax = yMax ? yMax * 1.05 : dataMax * 1.15;
   const xRange = xMax - xMin;
 
   const anns: string[] = [];
@@ -313,48 +314,38 @@ function buildSteppedChartString(
     // Vertical dashed line at step start
     anns.push(`sl${i}:{type:'line',xMin:${m.startMs},xMax:${m.startMs},borderColor:'${STEP_LINE_COLOR}',borderWidth:1,borderDash:[4,4]}`);
 
-    // Step name label — vertical, positioned in upper third of band
+    // Step name label — vertical, positioned in upper portion of band
     const midMs = (m.startMs + m.endMs) / 2;
-    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${chartYMax * 0.65},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},rotation:-90,padding:{top:2,bottom:2,left:3,right:3},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
+    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${chartYMax * 0.62},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},rotation:-90,padding:{top:2,bottom:2,left:3,right:3},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
   }
 
-  // Time labels as annotations at step boundaries + chart edges
-  function fmtMs(ms: number): string {
-    const d = new Date(ms);
-    return d.getUTCHours().toString().padStart(2, '0') + ':'
-      + d.getUTCMinutes().toString().padStart(2, '0') + ':'
-      + d.getUTCSeconds().toString().padStart(2, '0');
-  }
-  const timeTicks: { ms: number; label: string }[] = [
-    { ms: xMin, label: fmtMs(xMin) },
-    { ms: xMax, label: fmtMs(xMax) },
-  ];
-  for (const m of steps) {
-    timeTicks.push({ ms: m.startMs, label: fmtMs(m.startMs) });
-    timeTicks.push({ ms: m.endMs, label: fmtMs(m.endMs) });
-  }
+  // Build tick points at step boundaries + chart edges
+  const tickSet = new Set<number>();
+  tickSet.add(xMin);
+  tickSet.add(xMax);
+  for (const m of steps) { tickSet.add(m.startMs); tickSet.add(m.endMs); }
   // Deduplicate ticks that are too close (< 5% of range)
+  const sortedTicks = [...tickSet].sort((a, b) => a - b);
   const minGap = xRange * 0.05;
-  const sorted = [...new Map(timeTicks.map(t => [t.ms, t])).values()]
-    .sort((a, b) => a.ms - b.ms);
-  const kept: typeof sorted = [sorted[0]];
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].ms - kept[kept.length - 1].ms >= minGap) {
-      kept.push(sorted[i]);
+  const kept: number[] = [sortedTicks[0]];
+  for (let i = 1; i < sortedTicks.length; i++) {
+    if (sortedTicks[i] - kept[kept.length - 1] >= minGap) {
+      kept.push(sortedTicks[i]);
     }
   }
-  if (kept[kept.length - 1].ms !== sorted[sorted.length - 1].ms) {
-    kept.push(sorted[sorted.length - 1]);
+  if (kept[kept.length - 1] !== sortedTicks[sortedTicks.length - 1]) {
+    kept.push(sortedTicks[sortedTicks.length - 1]);
   }
-  // Add time labels as annotation labels along the bottom
-  for (let i = 0; i < kept.length; i++) {
-    anns.push(`tl${i}:{type:'label',xValue:${kept[i].ms},yValue:0,content:['${kept[i].label}'],color:'${TICK}',font:{size:10},position:'start',yAdjust:16}`);
-  }
+  // Hidden dataset whose x-values force ticks at step boundaries
+  const tickPoints = JSON.stringify(kept.map(ms => ({ x: ms, y: null })));
 
   /* eslint-disable no-useless-escape */
   return `{
 type:'line',
-data:{datasets:[{label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2}]},
+data:{datasets:[
+  {label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2},
+  {data:${tickPoints},pointRadius:0,borderWidth:0,showLine:false}
+]},
 options:{
   plugins:{
     legend:{display:false},
@@ -364,7 +355,9 @@ options:{
   scales:{
     x:{
       type:'linear',min:${xMin - xRange * 0.01},max:${xMax + xRange * 0.01},
-      ticks:{display:false},
+      ticks:{source:'data',color:'${TICK}',font:{size:10},maxRotation:0,autoSkip:false,
+        callback:function(val){var d=new Date(val);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+':'+d.getUTCSeconds().toString().padStart(2,'0')}
+      },
       grid:{display:false},
       border:{display:false}
     },

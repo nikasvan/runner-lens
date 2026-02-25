@@ -298,8 +298,7 @@ function buildSteppedChartString(
   const data = JSON.stringify(dataPoints);
   const yValues = dataPoints.map(p => p.y);
   const dataMax = yValues.length > 0 ? Math.max(...yValues) : 100;
-  // Add 5% headroom so data at the max isn't clipped by the chart edge
-  const chartYMax = yMax ? yMax * 1.05 : dataMax * 1.15;
+  const chartYMax = yMax ?? dataMax * 1.15;
   const xRange = xMax - xMin;
 
   const anns: string[] = [];
@@ -369,7 +368,7 @@ options:{
       title:{display:true,text:'${yAxisLabel}',color:'${TICK}',font:{size:12}}
     }
   },
-  layout:{padding:{top:4,right:16,bottom:20,left:4}}
+  layout:{padding:{top:12,right:16,bottom:4,left:4}}
 }}`;
   /* eslint-enable no-useless-escape */
 }

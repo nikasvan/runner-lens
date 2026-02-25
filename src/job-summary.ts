@@ -24,7 +24,7 @@ const MEM_FILL = 'rgba(130,80,223,0.10)';
 const CHART_VERSION = '4';
 
 function fmtMem(mb: number): string {
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
 }
 
 function esc(s: string): string {
@@ -346,26 +346,6 @@ function buildSteppedChartString(
     anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${chartYMax * 0.62},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},rotation:-90,padding:{top:2,bottom:2,left:3,right:3},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
   }
 
-  // Build tick points at step boundaries + chart edges
-  const tickSet = new Set<number>();
-  tickSet.add(xMin);
-  tickSet.add(xMax);
-  for (const m of steps) { tickSet.add(m.startMs); tickSet.add(m.endMs); }
-  // Deduplicate ticks that are too close (< 5% of range)
-  const sortedTicks = [...tickSet].sort((a, b) => a - b);
-  const minGap = xRange * 0.05;
-  const kept: number[] = [sortedTicks[0]];
-  for (let i = 1; i < sortedTicks.length; i++) {
-    if (sortedTicks[i] - kept[kept.length - 1] >= minGap) {
-      kept.push(sortedTicks[i]);
-    }
-  }
-  if (kept[kept.length - 1] !== sortedTicks[sortedTicks.length - 1]) {
-    kept.push(sortedTicks[sortedTicks.length - 1]);
-  }
-  // Hidden dataset whose x-values force ticks at step boundaries
-  const tickPoints = JSON.stringify(kept.map(ms => ({ x: ms, y: null })));
-
   const extraDS = (extraLines ?? []).map(e =>
     `{label:'${e.label.replace(/'/g, "\\'")}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,borderWidth:1.5,borderDash:[4,3],clip:false}`
   );
@@ -374,8 +354,7 @@ function buildSteppedChartString(
   return `{
 type:'line',
 data:{datasets:[
-  {label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false},
-  ${extraDS.length > 0 ? extraDS.join(',') + ',' : ''}{data:${tickPoints},pointRadius:0,borderWidth:0,showLine:false}
+  {label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
 ]},
 options:{
   plugins:{
@@ -386,7 +365,7 @@ options:{
   scales:{
     x:{
       type:'linear',min:${xMin - xRange * 0.01},max:${xMax + xRange * 0.01},
-      ticks:{source:'data',color:'${TICK}',font:{size:10},maxRotation:0,autoSkip:false,
+      ticks:{color:'${TICK}',font:{size:10},maxRotation:0,autoSkipPadding:20,
         callback:function(val){var d=new Date(val);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+':'+d.getUTCSeconds().toString().padStart(2,'0')}
       },
       grid:{display:false},
@@ -669,11 +648,12 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
           { label: 'system', values: timeline.cpu_system, color: CPU_SYS_COLOR },
         ],
       ));
+      const memGb = timeline.mem_mb.map(v => Math.round((v / 1024) * 100) / 100);
       parts.push(await buildQuickChart(
-        'Memory Usage (MB)', timeline.mem_mb, 'MB',
+        'Memory Usage (GB)', memGb, 'GB',
         MEM_COLOR, MEM_FILL,
         report.started_at, report.ended_at,
-        chartSteps, report.memory.total_mb,
+        chartSteps, Math.round((report.memory.total_mb / 1024) * 100) / 100,
       ));
     } catch {
       // Best-effort: skip charts on failure

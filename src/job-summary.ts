@@ -37,11 +37,21 @@ function shortOsName(release: string): string {
 }
 
 function shortCpuModel(model: string): string {
-  // "AMD EPYC 7763 64-Core Processor" → "AMD EPYC 7763"
-  return model
+  // "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz" → "Xeon Platinum 8370C"
+  // "AMD EPYC 7763 64-Core Processor" → "EPYC 7763"
+  let s = model
+    .replace(/\(R\)/gi, '')
+    .replace(/\(TM\)/gi, '')
     .replace(/\s*\d+-Core Processor$/i, '')
     .replace(/\s*with\s+.*$/i, '')
-    .replace(/\s+@\s+[\d.]+GHz$/i, '');
+    .replace(/\s+@\s+[\d.]+GHz$/i, '')
+    .replace(/\s+CPU$/i, '')
+    .replace(/^Intel\s+/i, '')
+    .replace(/^AMD\s+/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (s.length > 24) s = s.slice(0, 21) + '...';
+  return s;
 }
 
 // ── QuickChart HTTP helper ───────────────────────────────────
@@ -342,7 +352,7 @@ function buildSteppedChartString(
   return `{
 type:'line',
 data:{datasets:[
-  {label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2},
+  {label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false},
   {data:${tickPoints},pointRadius:0,borderWidth:0,showLine:false}
 ]},
 options:{

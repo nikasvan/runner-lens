@@ -41,6 +41,8 @@ function aggregate(
     cpu_user: samples.map(s => s.cpu.user),
     cpu_system: samples.map(s => s.cpu.system),
     mem_mb: samples.map(s => s.memory.used_mb),
+    mem_cached_mb: samples.map(s => s.memory.cached_mb),
+    mem_swap_mb: samples.map(s => s.memory.swap_used_mb),
   } : undefined;
 
   const report: AggregatedReport = {

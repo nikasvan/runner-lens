@@ -21,6 +21,8 @@ const CPU_USER_COLOR = '#3fb950';
 const CPU_SYS_COLOR = '#f0883e';
 const MEM_COLOR = '#8250df';
 const MEM_FILL = 'rgba(130,80,223,0.10)';
+const MEM_CACHED_COLOR = '#58a6ff';
+const MEM_SWAP_COLOR = '#da3633';
 const CHART_VERSION = '4';
 
 function fmtMem(mb: number): string {
@@ -265,7 +267,7 @@ function buildChartConfig(
     data: {
       labels,
       datasets: [{
-        label: title,
+        label: hasExtra ? 'total' : title,
         data: values,
         borderColor: lineColor,
         backgroundColor: fillColor,
@@ -278,7 +280,7 @@ function buildChartConfig(
     options: {
       plugins: {
         legend: hasExtra
-          ? { display: true, labels: { boxWidth: 20, font: { size: 10 } } }
+          ? { display: true, labels: { boxWidth: 20, boxHeight: 2, font: { size: 10 } } }
           : { display: false },
         title: {
           display: true,
@@ -354,11 +356,11 @@ function buildSteppedChartString(
   return `{
 type:'line',
 data:{datasets:[
-  {label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
+  {label:'${extraDS.length > 0 ? 'total' : title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
 ]},
 options:{
   plugins:{
-    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{boxWidth:20,font:{size:10}}" : ''}},
+    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{boxWidth:20,boxHeight:2,font:{size:10}}" : ''}},
     title:{display:true,text:'${title.replace(/'/g, "\\'")}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
     annotation:{annotations:{${anns.join(',')}}}
   },
@@ -648,12 +650,17 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
           { label: 'system', values: timeline.cpu_system, color: CPU_SYS_COLOR },
         ],
       ));
-      const memGb = timeline.mem_mb.map(v => Math.round((v / 1024) * 100) / 100);
+      const toGb = (v: number) => Math.round((v / 1024) * 100) / 100;
+      const memGb = timeline.mem_mb.map(toGb);
       parts.push(await buildQuickChart(
         'Memory Usage (GB)', memGb, 'GB',
         MEM_COLOR, MEM_FILL,
         report.started_at, report.ended_at,
-        chartSteps, Math.round((report.memory.total_mb / 1024) * 100) / 100,
+        chartSteps, toGb(report.memory.total_mb),
+        [
+          { label: 'cached', values: timeline.mem_cached_mb.map(toGb), color: MEM_CACHED_COLOR },
+          { label: 'swap', values: timeline.mem_swap_mb.map(toGb), color: MEM_SWAP_COLOR },
+        ],
       ));
     } catch {
       // Best-effort: skip charts on failure

@@ -98,6 +98,8 @@ export interface AggregatedReport {
     cpu_user: number[];   // user CPU %
     cpu_system: number[]; // system CPU %
     mem_mb: number[];     // memory usage in MB
+    mem_cached_mb: number[];  // filesystem cache in MB
+    mem_swap_mb: number[];    // swap usage in MB
   };
   collector?: { avg_cpu_pct: number; avg_mem_mb: number; max_mem_mb: number };
   reporter?: { cpu_pct: number; mem_mb: number };

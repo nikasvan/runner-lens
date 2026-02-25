@@ -386,6 +386,8 @@ describe('buildJobSummary', () => {
         cpu_user: [8, 15, 22, 30, 38],
         cpu_system: [2, 5, 8, 10, 12],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
+        mem_cached_mb: [200, 300, 400, 350, 250],
+        mem_swap_mb: [0, 0, 10, 20, 5],
       },
     }), 3);
     expect(html).toContain('<img src="https://quickchart.io/chart');
@@ -404,6 +406,8 @@ describe('buildJobSummary', () => {
         cpu_user: [8, 15, 22, 30, 38],
         cpu_system: [2, 5, 8, 10, 12],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
+        mem_cached_mb: [200, 300, 400, 350, 250],
+        mem_swap_mb: [0, 0, 10, 20, 5],
       },
     }), 3);
     expect(html).toContain('<img');
@@ -442,7 +446,7 @@ describe('buildJobSummary', () => {
     const cpu = Array.from({ length: 60 }, (_, i) => 20 + (i % 30));
     const mem = Array.from({ length: 60 }, (_, i) => 1000 + i * 50);
     const md = await buildJobSummary(makeReport({
-      timeline: { cpu_pct: cpu, cpu_user: cpu.map(v => v * 0.7), cpu_system: cpu.map(v => v * 0.3), mem_mb: mem },
+      timeline: { cpu_pct: cpu, cpu_user: cpu.map(v => v * 0.7), cpu_system: cpu.map(v => v * 0.3), mem_mb: mem, mem_cached_mb: mem.map(v => v * 0.1), mem_swap_mb: mem.map(() => 0) },
     }), 3);
     expect(md).toContain('quickchart.io');
     expect(md).toContain('CPU Usage');

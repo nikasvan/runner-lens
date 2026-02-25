@@ -393,7 +393,7 @@ describe('buildJobSummary', () => {
   }
 
   it('produces summary with stat cards image and footer', async () => {
-    const md = await buildJobSummary(makeReport());
+    const md = await buildJobSummary(makeReport(), 3);
     expect(md).toContain('<img');
     expect(md).toContain('Runner Stats');
     expect(md).toContain('RunnerLens');
@@ -405,7 +405,7 @@ describe('buildJobSummary', () => {
         cpu_pct: [10, 20, 30, 40, 50],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
-    }));
+    }), 3);
     expect(html).toContain('<img src="https://quickchart.io/chart');
     expect(html).toContain('CPU Usage');
     expect(html).toContain('Memory Usage');
@@ -421,13 +421,13 @@ describe('buildJobSummary', () => {
         cpu_pct: [10, 20, 30, 40, 50],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
-    }));
+    }), 3);
     expect(html).toContain('<img');
     expect(html).toContain('Execution Timeline');
   });
 
   it('skips line charts when no timeline data', async () => {
-    const md = await buildJobSummary(makeReport({ timeline: undefined }));
+    const md = await buildJobSummary(makeReport({ timeline: undefined }), 3);
     // Stat cards image is still present
     expect(md).toContain('Runner Stats');
     // But no CPU/Memory line charts
@@ -435,7 +435,7 @@ describe('buildJobSummary', () => {
   });
 
   it('includes footer with version', async () => {
-    const html = await buildJobSummary(makeReport());
+    const html = await buildJobSummary(makeReport(), 3);
     expect(html).toContain('v1.0.0');
     expect(html).toContain('runnerlens/runner-lens');
   });
@@ -449,7 +449,7 @@ describe('buildJobSummary', () => {
     // Value is baked into the stat cards image; verify the summary still builds
     const md = await buildJobSummary(makeReport({
       memory: { avg: 512, max: 800, min: 100, p50: 500, p95: 750, p99: 780, latest: 600, total_mb: 1024, swap_max_mb: 0 },
-    }));
+    }), 3);
     expect(md).toContain('Runner Stats');
     expect(md).toContain('RunnerLens');
   });
@@ -459,7 +459,7 @@ describe('buildJobSummary', () => {
     const mem = Array.from({ length: 60 }, (_, i) => 1000 + i * 50);
     const md = await buildJobSummary(makeReport({
       timeline: { cpu_pct: cpu, mem_mb: mem },
-    }));
+    }), 3);
     expect(md).toContain('quickchart.io');
     expect(md).toContain('CPU Usage');
     expect(md).toContain('Memory Usage');

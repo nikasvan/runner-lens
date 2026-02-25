@@ -559,7 +559,7 @@ function buildGanttFallback(ganttJob: GanttJob): string {
 
 // ── Helpers: per-job section ─────────────────────────────────
 
-async function buildJobSection(report: AggregatedReport): Promise<string> {
+async function buildJobSection(report: AggregatedReport, sampleInterval: number): Promise<string> {
   const parts: string[] = [];
 
   // Stat cards
@@ -570,6 +570,12 @@ async function buildJobSection(report: AggregatedReport): Promise<string> {
   }
 
   // CPU + Memory charts
+  // Filter out steps whose duration is <= the scrape interval
+  // (they are too short to meaningfully display on the chart)
+  const chartSteps = report.steps?.filter(s => {
+    const durSec = (new Date(s.completed_at).getTime() - new Date(s.started_at).getTime()) / 1000;
+    return durSec > sampleInterval;
+  });
   const timeline = report.timeline;
   if (timeline && timeline.cpu_pct.length >= 2) {
     try {
@@ -577,13 +583,13 @@ async function buildJobSection(report: AggregatedReport): Promise<string> {
         'CPU Usage (%)', timeline.cpu_pct, 'CPU %',
         CPU_COLOR, CPU_FILL,
         report.started_at, report.ended_at,
-        report.steps,
+        chartSteps,
       ));
       parts.push(await buildQuickChart(
         'Memory Usage (MB)', timeline.mem_mb, 'MB',
         MEM_COLOR, MEM_FILL,
         report.started_at, report.ended_at,
-        report.steps,
+        chartSteps,
       ));
     } catch {
       // Best-effort: skip charts on failure
@@ -595,10 +601,10 @@ async function buildJobSection(report: AggregatedReport): Promise<string> {
 
 // ── Public API ───────────────────────────────────────────────
 
-export async function buildJobSummary(report: AggregatedReport): Promise<string> {
+export async function buildJobSummary(report: AggregatedReport, sampleInterval: number): Promise<string> {
   const parts: string[] = [];
 
-  parts.push(await buildJobSection(report));
+  parts.push(await buildJobSection(report, sampleInterval));
 
   // Gantt timeline
   const ganttJob = collectGanttSteps(report);

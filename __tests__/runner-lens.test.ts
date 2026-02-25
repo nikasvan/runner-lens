@@ -29,10 +29,6 @@ function makeSample(overrides: Partial<MetricSample> = {}): MetricSample {
       cached_mb: 1024, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 42.9,
     },
     load: { load1: 1.5, load5: 1.2, load15: 0.9 },
-    processes: [
-      { pid: 100, name: 'node', cpu_pct: 35.0, mem_mb: 256 },
-      { pid: 101, name: 'npm', cpu_pct: 10.0, mem_mb: 128 },
-    ],
     collector: { cpu_pct: 0.2, mem_mb: 3.5 },
     ...overrides,
   };
@@ -137,19 +133,6 @@ describe('processMetrics', () => {
     expect(Number.isFinite(report.memory.avg)).toBe(true);
   });
 
-  it('deduplicates top processes by name keeping highest CPU', () => {
-    const s1 = makeSample({
-      processes: [{ pid: 1, name: 'node', cpu_pct: 20, mem_mb: 100 }],
-    });
-    const s2 = makeSample({
-      processes: [{ pid: 1, name: 'node', cpu_pct: 80, mem_mb: 200 }],
-    });
-    const { report } = processMetrics([s1, s2], makeSysInfo(), 6);
-    const nodeProcs = report.top_processes.filter((p) => p.name === 'node');
-    expect(nodeProcs).toHaveLength(1);
-    expect(nodeProcs[0].cpu_pct).toBe(80);
-  });
-
   it('includes swap_max_mb in memory stats', () => {
     const s = makeSample({
       memory: { total_mb: 7168, used_mb: 6000, available_mb: 1168, cached_mb: 512, swap_total_mb: 2048, swap_used_mb: 768, usage_pct: 83.7 },
@@ -168,8 +151,8 @@ describe('processMetrics', () => {
     );
     const { report } = processMetrics(samples, makeSysInfo(), 300);
     expect(report.timeline).toBeDefined();
-    expect(report.timeline!.cpu_pct).toHaveLength(80);
-    expect(report.timeline!.mem_mb).toHaveLength(80);
+    expect(report.timeline!.cpu_pct).toHaveLength(100);
+    expect(report.timeline!.mem_mb).toHaveLength(100);
   });
 
   it('omits timeline for single sample', () => {
@@ -353,10 +336,8 @@ describe('edge cases', () => {
       cpu: { user: 10, system: 5, idle: 85, iowait: 0, steal: 0, usage: 15 },
       memory: { total_mb: 4096, used_mb: 1024, available_mb: 3072, cached_mb: 512, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 25 },
       load: { load1: 0, load5: 0, load15: 0 },
-      processes: [],
     };
     const { report } = processMetrics([sparse], makeSysInfo(), 3);
-    expect(report.top_processes).toEqual([]);
     expect(report.collector).toBeUndefined();
   });
 });
@@ -387,7 +368,6 @@ describe('buildJobSummary', () => {
       cpu: { avg: 45, max: 92, min: 5, p50: 42, p95: 85, p99: 90, latest: 70 },
       memory: { avg: 3072, max: 5120, min: 1024, p50: 3000, p95: 4800, p99: 5000, latest: 3500, total_mb: 7168, swap_max_mb: 0 },
       load: { avg_1m: 1.5, max_1m: 3.2 },
-      top_processes: [],
       ...overrides,
     };
   }

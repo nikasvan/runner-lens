@@ -1,25 +1,9 @@
 import type {
   MetricSample, SystemInfo,
-  AggregatedReport, ProcessInfo, StepMetrics,
+  AggregatedReport, StepMetrics,
 } from './types';
 import { stats, safeMax } from './stats';
 import { REPORT_VERSION } from './constants';
-
-const TIMELINE_POINTS = 80;
-
-function downsample(values: number[], n: number): number[] {
-  if (values.length <= n) return values;
-  const out: number[] = [];
-  const step = (values.length - 1) / (n - 1);
-  for (let i = 0; i < n; i++) {
-    const pos = i * step;
-    const lo = Math.floor(pos);
-    const hi = Math.min(lo + 1, values.length - 1);
-    const frac = pos - lo;
-    out.push(+(values[lo] * (1 - frac) + values[hi] * frac).toFixed(1));
-  }
-  return out;
-}
 
 function aggregate(
   samples: MetricSample[],
@@ -37,15 +21,6 @@ function aggregate(
     ? loadVals.reduce((a, b) => a + b, 0) / loadVals.length
     : 0;
 
-  const procMap = new Map<string, ProcessInfo>();
-  for (const s of samples) {
-    for (const p of s.processes ?? []) {
-      const cur = procMap.get(p.name);
-      if (!cur || p.cpu_pct > cur.cpu_pct) procMap.set(p.name, p);
-    }
-  }
-  const topProcs = [...procMap.values()].sort((a, b) => b.cpu_pct - a.cpu_pct).slice(0, 10);
-
   const last = samples[samples.length - 1];
 
   // ── Collector self-monitoring stats ─────────────────────
@@ -62,8 +37,8 @@ function aggregate(
   }
 
   const timeline = samples.length >= 2 ? {
-    cpu_pct: downsample(samples.map(s => s.cpu.usage), TIMELINE_POINTS),
-    mem_mb: downsample(samples.map(s => s.memory.used_mb), TIMELINE_POINTS),
+    cpu_pct: samples.map(s => s.cpu.usage),
+    mem_mb: samples.map(s => s.memory.used_mb),
   } : undefined;
 
   const report: AggregatedReport = {
@@ -79,7 +54,6 @@ function aggregate(
       avg_1m: loadAvg,
       max_1m: safeMax(loadVals),
     },
-    top_processes: topProcs,
     ...(steps && steps.length > 0 ? { steps } : {}),
     ...(timeline ? { timeline } : {}),
     ...(collector ? { collector } : {}),

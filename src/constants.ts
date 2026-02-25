@@ -12,8 +12,6 @@ export const START_TS_FILE = path.join(DATA_DIR, 'start_ts');
 /** State keys shared between main → post. */
 export const STATE = {
   ACTIVE: 'runnerlens-active',
-  DATA_DIR: 'runnerlens-data-dir',
-  PID: 'runnerlens-pid',
 } as const;
 
 export const REPORT_VERSION = '1.0.0';

@@ -150,7 +150,7 @@ while true; do
   # ── Rotate if needed, then emit JSONL line ──────────────
   maybe_rotate
 
-  printf '{"timestamp":%s,"cpu":{"user":%s,"system":%s,"idle":%s,"iowait":%s,"steal":%s,"usage":%s},"memory":{"total_mb":%s,"used_mb":%s,"available_mb":%s,"cached_mb":%s,"swap_total_mb":%s,"swap_used_mb":%s,"usage_pct":%s},"load":{"load1":%s,"load5":%s,"load15":%s},"processes":[],"collector":{"cpu_pct":%s,"mem_mb":%s}}\n' \
+  printf '{"timestamp":%s,"cpu":{"user":%s,"system":%s,"idle":%s,"iowait":%s,"steal":%s,"usage":%s},"memory":{"total_mb":%s,"used_mb":%s,"available_mb":%s,"cached_mb":%s,"swap_total_mb":%s,"swap_used_mb":%s,"usage_pct":%s},"load":{"load1":%s,"load5":%s,"load15":%s},"collector":{"cpu_pct":%s,"mem_mb":%s}}\n' \
     "$ts" "$cpu_u" "$cpu_s" "$cpu_id" "$cpu_w" "$cpu_st" "$cpu_pct" \
     "$mt" "$mu" "$ma" "$mc" "$stt" "$su" "$mp" \
     "$l1" "$l5" "$l15" \

@@ -21,13 +21,6 @@ export interface MemorySample {
   usage_pct: number;
 }
 
-export interface ProcessInfo {
-  pid: number;
-  name: string;
-  cpu_pct: number;
-  mem_mb: number;
-}
-
 export interface LoadAverage {
   load1: number;
   load5: number;
@@ -44,7 +37,6 @@ export interface MetricSample {
   cpu: CpuSample;
   memory: MemorySample;
   load: LoadAverage;
-  processes: ProcessInfo[];
   collector?: CollectorSample;
 }
 
@@ -100,7 +92,6 @@ export interface AggregatedReport {
   memory: MetricStats & { total_mb: number; swap_max_mb: number };
 
   load: { avg_1m: number; max_1m: number };
-  top_processes: ProcessInfo[];
   steps?: StepMetrics[];
   timeline?: {
     cpu_pct: number[];   // downsampled CPU usage %, 0-100
@@ -109,5 +100,3 @@ export interface AggregatedReport {
   collector?: { avg_cpu_pct: number; avg_mem_mb: number; max_mem_mb: number };
   reporter?: { cpu_pct: number; mem_mb: number };
 }
-
-

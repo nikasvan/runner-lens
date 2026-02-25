@@ -5,7 +5,8 @@ import { spawn } from 'child_process';
 import { collectSystemInfo } from './system-info';
 import { parseConfig } from './config';
 import {
-  DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
+  DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE,
+  STATE,
 } from './constants';
 
 async function run(): Promise<void> {
@@ -62,8 +63,6 @@ async function run(): Promise<void> {
 
     // ── Persist state for the post step ───────────────────
     core.saveState(STATE.ACTIVE, 'true');
-    core.saveState(STATE.DATA_DIR, DATA_DIR);
-    core.saveState(STATE.PID, child.pid.toString());
 
   } catch (err) {
     // Never fail the user's workflow — monitoring is best-effort.

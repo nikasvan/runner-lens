@@ -258,7 +258,6 @@ function buildChartConfig(
     fill: false,
     tension: 0.4,
     pointRadius: 0,
-    pointStyle: 'line' as const,
     borderWidth: 1.5,
     borderDash: [4, 3],
   }));
@@ -275,14 +274,13 @@ function buildChartConfig(
         fill: true,
         tension: 0.4,
         pointRadius: 0,
-        pointStyle: 'line' as const,
         borderWidth: 2,
       }, ...extraDS],
     },
     options: {
       plugins: {
         legend: hasExtra
-          ? { display: true, labels: { usePointStyle: true, pointStyleWidth: 24, font: { size: 10 } } }
+          ? { display: true, labels: { boxHeight: 0, boxWidth: 24, font: { size: 10 } } }
           : { display: false },
         title: {
           display: true,
@@ -351,18 +349,18 @@ function buildSteppedChartString(
   }
 
   const extraDS = (extraLines ?? []).map(e =>
-    `{label:'${e.label.replace(/'/g, "\\'")}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,pointStyle:'line',borderWidth:1.5,borderDash:[4,3],clip:false}`
+    `{label:'${e.label.replace(/'/g, "\\'")}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,borderWidth:1.5,borderDash:[4,3],clip:false}`
   );
 
   /* eslint-disable no-useless-escape */
   return `{
 type:'line',
 data:{datasets:[
-  {label:'${extraDS.length > 0 ? 'total' : title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,pointStyle:'line',borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
+  {label:'${extraDS.length > 0 ? 'total' : title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
 ]},
 options:{
   plugins:{
-    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{usePointStyle:true,pointStyleWidth:24,font:{size:10}}" : ''}},
+    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{boxHeight:0,boxWidth:24,font:{size:10}}" : ''}},
     title:{display:true,text:'${title.replace(/'/g, "\\'")}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
     annotation:{annotations:{${anns.join(',')}}}
   },

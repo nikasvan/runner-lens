@@ -313,28 +313,43 @@ function buildSteppedChartString(
     // Vertical dashed line at step start
     anns.push(`sl${i}:{type:'line',xMin:${m.startMs},xMax:${m.startMs},borderColor:'${STEP_LINE_COLOR}',borderWidth:1,borderDash:[4,4]}`);
 
-    // Step name label at top of band, vertical
+    // Step name label — vertical, positioned in upper third of band
     const midMs = (m.startMs + m.endMs) / 2;
-    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${chartYMax * 0.92},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},rotation:-90,padding:{top:2,bottom:2,left:3,right:3},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
+    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${chartYMax * 0.65},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},rotation:-90,padding:{top:2,bottom:2,left:3,right:3},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
   }
 
-  // Collect unique tick values at step boundaries + chart edges
-  const tickMs: number[] = [xMin, xMax];
-  for (const m of steps) { tickMs.push(m.startMs, m.endMs); }
-  // Deduplicate ticks that are too close together (< 3% of range)
-  const sortedTicks = [...new Set(tickMs)].sort((a, b) => a - b);
-  const minGap = xRange * 0.03;
-  const filteredTicks: number[] = [sortedTicks[0]];
-  for (let i = 1; i < sortedTicks.length; i++) {
-    if (sortedTicks[i] - filteredTicks[filteredTicks.length - 1] >= minGap) {
-      filteredTicks.push(sortedTicks[i]);
+  // Time labels as annotations at step boundaries + chart edges
+  function fmtMs(ms: number): string {
+    const d = new Date(ms);
+    return d.getUTCHours().toString().padStart(2, '0') + ':'
+      + d.getUTCMinutes().toString().padStart(2, '0') + ':'
+      + d.getUTCSeconds().toString().padStart(2, '0');
+  }
+  const timeTicks: { ms: number; label: string }[] = [
+    { ms: xMin, label: fmtMs(xMin) },
+    { ms: xMax, label: fmtMs(xMax) },
+  ];
+  for (const m of steps) {
+    timeTicks.push({ ms: m.startMs, label: fmtMs(m.startMs) });
+    timeTicks.push({ ms: m.endMs, label: fmtMs(m.endMs) });
+  }
+  // Deduplicate ticks that are too close (< 5% of range)
+  const minGap = xRange * 0.05;
+  const sorted = [...new Map(timeTicks.map(t => [t.ms, t])).values()]
+    .sort((a, b) => a.ms - b.ms);
+  const kept: typeof sorted = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].ms - kept[kept.length - 1].ms >= minGap) {
+      kept.push(sorted[i]);
     }
   }
-  // Always include the last tick
-  if (filteredTicks[filteredTicks.length - 1] !== sortedTicks[sortedTicks.length - 1]) {
-    filteredTicks.push(sortedTicks[sortedTicks.length - 1]);
+  if (kept[kept.length - 1].ms !== sorted[sorted.length - 1].ms) {
+    kept.push(sorted[sorted.length - 1]);
   }
-  const forcedTicks = JSON.stringify(filteredTicks);
+  // Add time labels as annotation labels along the bottom
+  for (let i = 0; i < kept.length; i++) {
+    anns.push(`tl${i}:{type:'label',xValue:${kept[i].ms},yValue:0,content:['${kept[i].label}'],color:'${TICK}',font:{size:10},position:'start',yAdjust:16}`);
+  }
 
   /* eslint-disable no-useless-escape */
   return `{
@@ -349,10 +364,7 @@ options:{
   scales:{
     x:{
       type:'linear',min:${xMin - xRange * 0.01},max:${xMax + xRange * 0.01},
-      afterBuildTicks:function(axis){axis.ticks=${forcedTicks}.map(function(v){return {value:v}})},
-      ticks:{color:'${TICK}',font:{size:10},maxRotation:0,
-        callback:function(val){if(val<${xMin}||val>${xMax})return '';var d=new Date(val);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+':'+d.getUTCSeconds().toString().padStart(2,'0')}
-      },
+      ticks:{display:false},
       grid:{display:false},
       border:{display:false}
     },
@@ -364,7 +376,7 @@ options:{
       title:{display:true,text:'${yAxisLabel}',color:'${TICK}',font:{size:12}}
     }
   },
-  layout:{padding:{top:4,right:16,bottom:4,left:4}}
+  layout:{padding:{top:4,right:16,bottom:20,left:4}}
 }}`;
   /* eslint-enable no-useless-escape */
 }

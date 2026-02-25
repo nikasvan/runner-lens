@@ -293,11 +293,12 @@ function buildSteppedChartString(
   xMin: number,
   xMax: number,
   steps: { name: string; startMs: number; endMs: number }[],
+  yMax?: number,
 ): string {
   const data = JSON.stringify(dataPoints);
   const yValues = dataPoints.map(p => p.y);
   const dataMax = yValues.length > 0 ? Math.max(...yValues) : 100;
-  const suggestedMax = dataMax * 1.35;
+  const chartYMax = yMax ?? dataMax * 1.15;
   const xRange = xMax - xMin;
 
   const anns: string[] = [];
@@ -312,20 +313,28 @@ function buildSteppedChartString(
     // Vertical dashed line at step start
     anns.push(`sl${i}:{type:'line',xMin:${m.startMs},xMax:${m.startMs},borderColor:'${STEP_LINE_COLOR}',borderWidth:1,borderDash:[4,4]}`);
 
-    // Step name label at top of chart, horizontal
+    // Step name label at top of band, vertical
     const midMs = (m.startMs + m.endMs) / 2;
-    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${suggestedMax * 0.97},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},padding:{top:2,bottom:2,left:4,right:4},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
+    anns.push(`sn${i}:{type:'label',xValue:${midMs},yValue:${chartYMax * 0.92},content:['${truncName}'],color:'#1f2328',font:{size:9,weight:'bold'},rotation:-90,padding:{top:2,bottom:2,left:3,right:3},backgroundColor:'rgba(255,255,255,0.85)',borderRadius:3}`);
   }
 
   // Collect unique tick values at step boundaries + chart edges
-  const tickSet = new Set<number>();
-  tickSet.add(xMin);
-  tickSet.add(xMax);
-  for (const m of steps) {
-    tickSet.add(m.startMs);
-    tickSet.add(m.endMs);
+  const tickMs: number[] = [xMin, xMax];
+  for (const m of steps) { tickMs.push(m.startMs, m.endMs); }
+  // Deduplicate ticks that are too close together (< 3% of range)
+  const sortedTicks = [...new Set(tickMs)].sort((a, b) => a - b);
+  const minGap = xRange * 0.03;
+  const filteredTicks: number[] = [sortedTicks[0]];
+  for (let i = 1; i < sortedTicks.length; i++) {
+    if (sortedTicks[i] - filteredTicks[filteredTicks.length - 1] >= minGap) {
+      filteredTicks.push(sortedTicks[i]);
+    }
   }
-  const forcedTicks = JSON.stringify([...tickSet].sort((a, b) => a - b));
+  // Always include the last tick
+  if (filteredTicks[filteredTicks.length - 1] !== sortedTicks[sortedTicks.length - 1]) {
+    filteredTicks.push(sortedTicks[sortedTicks.length - 1]);
+  }
+  const forcedTicks = JSON.stringify(filteredTicks);
 
   /* eslint-disable no-useless-escape */
   return `{
@@ -348,7 +357,7 @@ options:{
       border:{display:false}
     },
     y:{
-      beginAtZero:true,suggestedMax:${suggestedMax},
+      beginAtZero:true,max:${chartYMax},
       ticks:{color:'${TICK}',font:{size:11}},
       grid:{color:'#eff2f5'},
       border:{display:false},
@@ -379,6 +388,7 @@ async function buildQuickChart(
   startedAt: string,
   endedAt: string,
   steps?: { name: string; started_at: string; completed_at: string }[],
+  yMax?: number,
 ): Promise<string> {
   const maxPts = 30;
   const data = downsample(values, maxPts);
@@ -415,7 +425,7 @@ async function buildQuickChart(
     }
 
     const chartStr = buildSteppedChartString(
-      title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, stepRegions,
+      title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, stepRegions, yMax,
     );
     const body = JSON.stringify({
       version: CHART_VERSION,
@@ -600,13 +610,13 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
         'CPU Usage (%)', timeline.cpu_pct, 'CPU %',
         CPU_COLOR, CPU_FILL,
         report.started_at, report.ended_at,
-        chartSteps,
+        chartSteps, 100,
       ));
       parts.push(await buildQuickChart(
         'Memory Usage (MB)', timeline.mem_mb, 'MB',
         MEM_COLOR, MEM_FILL,
         report.started_at, report.ended_at,
-        chartSteps,
+        chartSteps, report.memory.total_mb,
       ));
     } catch {
       // Best-effort: skip charts on failure

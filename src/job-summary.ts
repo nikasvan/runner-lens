@@ -100,7 +100,7 @@ function buildStatCardsConfig(report: AggregatedReport): Record<string, any> {
 
   const cards = [
     { accent: '#3fb950', label: 'RUNNER', value: runnerValue, sub: runnerSub },
-    { accent: '#58a6ff', label: 'DURATION', value: fmtDuration(report.duration_seconds), sub: `${report.sample_count} samples` },
+    { accent: '#58a6ff', label: 'DURATION', value: fmtDuration(report.duration_seconds), sub: `${report.started_at.slice(11, 19)} — ${report.ended_at.slice(11, 19)} UTC` },
     { accent: '#f0883e', label: 'CPU', value: `avg ${report.cpu.avg.toFixed(1)}%`, sub: `peak ${report.cpu.max.toFixed(1)}%` },
     { accent: '#bc8cff', label: 'MEMORY', value: `avg ${fmtMem(report.memory.avg)}`, sub: `peak ${fmtMem(report.memory.max)} / ${fmtMem(report.memory.total_mb)}` },
   ];
@@ -182,7 +182,7 @@ function buildStatCardsFallback(report: AggregatedReport): string {
   const dur = fmtDuration(report.duration_seconds);
 
   return [
-    `> **${runnerValue}** \u00b7 ${specs} \u00b7 **${dur}** \u00b7 ${report.sample_count} samples`,
+    `> **${runnerValue}** \u00b7 ${specs} \u00b7 **${dur}**`,
     '',
     '| Metric | Average | Peak |',
     '|:--|--:|--:|',

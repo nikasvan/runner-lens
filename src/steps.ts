@@ -18,7 +18,13 @@ interface GitHubStep {
 interface GitHubJob {
   name: string;
   status: string;
+  started_at: string | null;
   steps: GitHubStep[];
+}
+
+export interface FetchStepsResult {
+  steps: GitHubStep[];
+  jobStartedAt?: string;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -52,7 +58,7 @@ function httpGet(
   });
 }
 
-export async function fetchSteps(token: string): Promise<GitHubStep[]> {
+export async function fetchSteps(token: string): Promise<FetchStepsResult> {
   const repo  = process.env.GITHUB_REPOSITORY;
   const runId = process.env.GITHUB_RUN_ID;
   const job   = process.env.GITHUB_JOB;
@@ -60,7 +66,7 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
 
   if (!repo || !runId || !job) {
     core.info('RunnerLens: missing GITHUB env vars for step detection');
-    return [];
+    return { steps: [] };
   }
 
   const url = `${apiUrl}/repos/${repo}/actions/runs/${runId}/jobs?per_page=100`;
@@ -72,7 +78,7 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
 
   if (res.status !== 200) {
     core.info(`RunnerLens: GitHub API returned ${res.status} — add "permissions: actions: read" to your job for per-step breakdown`);
-    return [];
+    return { steps: [] };
   }
 
   const data = JSON.parse(res.body);
@@ -85,10 +91,13 @@ export async function fetchSteps(token: string): Promise<GitHubStep[]> {
     jobs.find((j) => j.status === 'in_progress');
   if (!current) {
     core.info(`RunnerLens: could not match job "${job}" — found: ${jobs.map((j) => j.name).join(', ')}`);
-    return [];
+    return { steps: [] };
   }
 
-  return current.steps ?? [];
+  return {
+    steps: current.steps ?? [],
+    jobStartedAt: current.started_at ?? undefined,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────

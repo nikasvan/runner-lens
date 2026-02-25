@@ -303,7 +303,7 @@ describe('fetchSteps (GitHub API)', () => {
     delete process.env.GITHUB_RUN_ID;
     delete process.env.GITHUB_JOB;
     const result = await fetchSteps('fake-token');
-    expect(result).toEqual([]);
+    expect(result).toEqual({ steps: [] });
   });
 });
 

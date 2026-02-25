@@ -7,7 +7,7 @@ import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
 import { processMetrics } from './reporter';
 import { safePct } from './stats';
-import { fetchSteps, correlateSteps } from './steps';
+import { fetchSteps, correlateSteps, type FetchStepsResult } from './steps';
 
 import { buildJobSummary } from './job-summary';
 import {
@@ -113,29 +113,36 @@ async function run(): Promise<void> {
       return;
     }
 
-    // ── Duration ──────────────────────────────────────────
-    let startTs = Date.now();
-    try {
-      if (fs.existsSync(START_TS_FILE))
-        startTs = parseInt(fs.readFileSync(START_TS_FILE, 'utf-8').trim(), 10);
-    } catch { /* ok */ }
-    const dur = Math.round((Date.now() - startTs) / 1000);
-
-    core.info(`RunnerLens: ${samples.length} samples over ${dur}s`);
-
     // ── Fetch per-step data (needs actions:read permission) ──
     let steps: StepMetrics[] | undefined;
+    let fetchResult: FetchStepsResult = { steps: [] };
     if (config.githubToken) {
       try {
-        const rawSteps = await fetchSteps(config.githubToken);
-        if (rawSteps.length > 0) {
-          steps = correlateSteps(rawSteps, samples);
+        fetchResult = await fetchSteps(config.githubToken);
+        if (fetchResult.steps.length > 0) {
+          steps = correlateSteps(fetchResult.steps, samples);
           core.info(`RunnerLens: correlated ${steps.length} steps`);
         }
       } catch (e) {
         core.debug(`RunnerLens: step fetch failed — ${e}`);
       }
     }
+
+    // ── Duration (prefer GitHub API job start time for accuracy) ──
+    let dur: number;
+    if (fetchResult.jobStartedAt) {
+      const jobStartMs = new Date(fetchResult.jobStartedAt).getTime();
+      dur = Math.round((Date.now() - jobStartMs) / 1000);
+    } else {
+      let startTs = Date.now();
+      try {
+        if (fs.existsSync(START_TS_FILE))
+          startTs = parseInt(fs.readFileSync(START_TS_FILE, 'utf-8').trim(), 10);
+      } catch { /* ok */ }
+      dur = Math.round((Date.now() - startTs) / 1000);
+    }
+
+    core.info(`RunnerLens: ${samples.length} samples over ${dur}s`);
 
     // ── Process ───────────────────────────────────────────
     const { report } = processMetrics(samples, sysInfo, dur, steps);

@@ -38,6 +38,8 @@ function aggregate(
 
   const timeline = samples.length >= 2 ? {
     cpu_pct: samples.map(s => s.cpu.usage),
+    cpu_user: samples.map(s => s.cpu.user),
+    cpu_system: samples.map(s => s.cpu.system),
     mem_mb: samples.map(s => s.memory.used_mb),
   } : undefined;
 

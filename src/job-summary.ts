@@ -17,6 +17,8 @@ const TICK = '#656d76';
 const TITLE_COLOR = '#1f2328';
 const CPU_COLOR = '#2f81f7';
 const CPU_FILL = 'rgba(47,129,247,0.10)';
+const CPU_USER_COLOR = '#3fb950';
+const CPU_SYS_COLOR = '#f0883e';
 const MEM_COLOR = '#8250df';
 const MEM_FILL = 'rgba(130,80,223,0.10)';
 const CHART_VERSION = '4';
@@ -244,7 +246,20 @@ function buildChartConfig(
   lineColor: string,
   fillColor: string,
   yAxisLabel: string,
+  extraLines?: { label: string; data: number[]; color: string }[],
 ): Record<string, any> {
+  const extraDS = (extraLines ?? []).map(e => ({
+    label: e.label,
+    data: e.data,
+    borderColor: e.color,
+    backgroundColor: 'transparent',
+    fill: false,
+    tension: 0.4,
+    pointRadius: 0,
+    borderWidth: 1.5,
+    borderDash: [4, 3],
+  }));
+  const hasExtra = extraDS.length > 0;
   return {
     type: 'line',
     data: {
@@ -258,11 +273,13 @@ function buildChartConfig(
         tension: 0.4,
         pointRadius: 0,
         borderWidth: 2,
-      }],
+      }, ...extraDS],
     },
     options: {
       plugins: {
-        legend: { display: false },
+        legend: hasExtra
+          ? { display: true, labels: { usePointStyle: true, pointStyle: 'line', boxWidth: 20, font: { size: 10 } } }
+          : { display: false },
         title: {
           display: true,
           text: title,
@@ -304,6 +321,7 @@ function buildSteppedChartString(
   xMax: number,
   steps: { name: string; startMs: number; endMs: number }[],
   yMax?: number,
+  extraLines?: { label: string; data: { x: number; y: number }[]; color: string }[],
 ): string {
   const data = JSON.stringify(dataPoints);
   const yValues = dataPoints.map(p => p.y);
@@ -348,16 +366,20 @@ function buildSteppedChartString(
   // Hidden dataset whose x-values force ticks at step boundaries
   const tickPoints = JSON.stringify(kept.map(ms => ({ x: ms, y: null })));
 
+  const extraDS = (extraLines ?? []).map(e =>
+    `{label:'${e.label.replace(/'/g, "\\'")}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,borderWidth:1.5,borderDash:[4,3],clip:false}`
+  );
+
   /* eslint-disable no-useless-escape */
   return `{
 type:'line',
 data:{datasets:[
   {label:'${title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false},
-  {data:${tickPoints},pointRadius:0,borderWidth:0,showLine:false}
+  ${extraDS.length > 0 ? extraDS.join(',') + ',' : ''}{data:${tickPoints},pointRadius:0,borderWidth:0,showLine:false}
 ]},
 options:{
   plugins:{
-    legend:{display:false},
+    legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{usePointStyle:true,pointStyle:'line',boxWidth:20,font:{size:10}}" : ''}},
     title:{display:true,text:'${title.replace(/'/g, "\\'")}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
     annotation:{annotations:{${anns.join(',')}}}
   },
@@ -393,6 +415,12 @@ function buildChartUrl(config: Record<string, unknown>): string {
   return `https://quickchart.io/chart?v=${CHART_VERSION}&c=${encoded}&w=760&h=250&bkg=${bkg}&f=png&devicePixelRatio=2`;
 }
 
+interface ExtraLine {
+  label: string;
+  values: number[];
+  color: string;
+}
+
 async function buildQuickChart(
   title: string,
   values: number[],
@@ -403,18 +431,26 @@ async function buildQuickChart(
   endedAt: string,
   steps?: { name: string; started_at: string; completed_at: string }[],
   yMax?: number,
+  extraLines?: ExtraLine[],
 ): Promise<string> {
   const maxPts = 30;
   const data = downsample(values, maxPts);
   const chartStartMs = new Date(startedAt).getTime();
   const chartEndMs = new Date(endedAt).getTime();
 
+  const extras = (extraLines ?? []).map(l => ({
+    label: l.label,
+    data: downsample(l.values, maxPts),
+    color: l.color,
+  }));
+
   // ── Steps present: use linear time axis so ALL steps are visible ──
   if (steps && steps.length > 0) {
-    const dataPoints = data.map((v, i) => ({
-      x: chartStartMs + (chartEndMs - chartStartMs) * i / Math.max(data.length - 1, 1),
+    const toXY = (d: number[]) => d.map((v, i) => ({
+      x: chartStartMs + (chartEndMs - chartStartMs) * i / Math.max(d.length - 1, 1),
       y: v,
     }));
+    const dataPoints = toXY(data);
 
     let xMin = chartStartMs;
     let xMax = chartEndMs;
@@ -438,8 +474,10 @@ async function buildQuickChart(
       xMax = Math.max(xMax, r.endMs);
     }
 
+    const extraXY = extras.map(e => ({ label: e.label, data: toXY(e.data), color: e.color }));
+
     const chartStr = buildSteppedChartString(
-      title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, stepRegions, yMax,
+      title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, stepRegions, yMax, extraXY,
     );
     const body = JSON.stringify({
       version: CHART_VERSION,
@@ -456,7 +494,8 @@ async function buildQuickChart(
 
   // ── No steps: use category axis (supports compact GET URLs) ──
   const labels = timeLabels(startedAt, endedAt, data.length);
-  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel);
+  const extraCat = extras.map(e => ({ label: e.label, data: e.data, color: e.color }));
+  const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel, extraCat);
   let url = buildChartUrl(config);
   if (url.length > QUICKCHART_URL_LIMIT) {
     const body = JSON.stringify({
@@ -625,6 +664,10 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
         CPU_COLOR, CPU_FILL,
         report.started_at, report.ended_at,
         chartSteps, 100,
+        [
+          { label: 'user', values: timeline.cpu_user, color: CPU_USER_COLOR },
+          { label: 'system', values: timeline.cpu_system, color: CPU_SYS_COLOR },
+        ],
       ));
       parts.push(await buildQuickChart(
         'Memory Usage (MB)', timeline.mem_mb, 'MB',

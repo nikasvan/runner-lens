@@ -383,6 +383,8 @@ describe('buildJobSummary', () => {
     const html = await buildJobSummary(makeReport({
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
+        cpu_user: [8, 15, 22, 30, 38],
+        cpu_system: [2, 5, 8, 10, 12],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }), 3);
@@ -399,6 +401,8 @@ describe('buildJobSummary', () => {
       ],
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
+        cpu_user: [8, 15, 22, 30, 38],
+        cpu_system: [2, 5, 8, 10, 12],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
       },
     }), 3);
@@ -438,7 +442,7 @@ describe('buildJobSummary', () => {
     const cpu = Array.from({ length: 60 }, (_, i) => 20 + (i % 30));
     const mem = Array.from({ length: 60 }, (_, i) => 1000 + i * 50);
     const md = await buildJobSummary(makeReport({
-      timeline: { cpu_pct: cpu, mem_mb: mem },
+      timeline: { cpu_pct: cpu, cpu_user: cpu.map(v => v * 0.7), cpu_system: cpu.map(v => v * 0.3), mem_mb: mem },
     }), 3);
     expect(md).toContain('quickchart.io');
     expect(md).toContain('CPU Usage');

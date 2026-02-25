@@ -94,8 +94,10 @@ export interface AggregatedReport {
   load: { avg_1m: number; max_1m: number };
   steps?: StepMetrics[];
   timeline?: {
-    cpu_pct: number[];   // downsampled CPU usage %, 0-100
-    mem_mb: number[];    // downsampled memory usage in MB
+    cpu_pct: number[];    // total CPU usage %, 0-100
+    cpu_user: number[];   // user CPU %
+    cpu_system: number[]; // system CPU %
+    mem_mb: number[];     // memory usage in MB
   };
   collector?: { avg_cpu_pct: number; avg_mem_mb: number; max_mem_mb: number };
   reporter?: { cpu_pct: number; mem_mb: number };

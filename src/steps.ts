@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import * as https from 'https';
+import type { IncomingMessage } from 'http';
 import type { MetricSample, StepMetrics } from './types';
 import { safeMax } from './stats';
 
@@ -31,12 +32,25 @@ export interface FetchStepsResult {
 // Fetch steps from GitHub API
 // ─────────────────────────────────────────────────────────────
 
+const MAX_REDIRECTS = 3;
+const TOTAL_TIMEOUT_MS = 15_000;
+
 function httpGet(
   url: string,
   headers: Record<string, string>,
+  redirectsLeft = MAX_REDIRECTS,
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
+
+    // Hard cap on total request time (connection + body transfer)
+    const totalTimer = setTimeout(() => {
+      req.destroy();
+      reject(new Error(`total timeout after ${TOTAL_TIMEOUT_MS}ms`));
+    }, TOTAL_TIMEOUT_MS);
+
+    const cleanup = (): void => { clearTimeout(totalTimer); };
+
     const req = https.request(
       {
         hostname: parsed.hostname,
@@ -46,14 +60,28 @@ function httpGet(
         headers: { ...headers, 'User-Agent': 'RunnerLens' },
         timeout: 10_000,
       },
-      (res) => {
+      (res: IncomingMessage) => {
+        // Follow redirects (301, 302, 307, 308)
+        const status = res.statusCode ?? 0;
+        if ([301, 302, 307, 308].includes(status) && res.headers.location) {
+          cleanup();
+          res.resume(); // drain the response
+          if (redirectsLeft <= 0) {
+            reject(new Error('too many redirects'));
+            return;
+          }
+          httpGet(res.headers.location, headers, redirectsLeft - 1)
+            .then(resolve, reject);
+          return;
+        }
+
         let data = '';
         res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
+        res.on('end', () => { cleanup(); resolve({ status, body: data }); });
       },
     );
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('error', (e) => { cleanup(); reject(e); });
+    req.on('timeout', () => { cleanup(); req.destroy(); reject(new Error('socket timeout')); });
     req.end();
   });
 }
@@ -69,25 +97,49 @@ export async function fetchSteps(token: string): Promise<FetchStepsResult> {
     return { steps: [] };
   }
 
-  const url = `${apiUrl}/repos/${repo}/actions/runs/${runId}/jobs?per_page=100`;
-  const res = await httpGet(url, {
+  const authHeaders = {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-  });
+  };
 
-  if (res.status !== 200) {
-    core.info(`RunnerLens: GitHub API returned ${res.status} — add "permissions: actions: read" to your job for per-step breakdown`);
-    return { steps: [] };
+  // Paginate through all jobs (matrix builds can exceed 100)
+  let jobs: GitHubJob[] = [];
+  let page = 1;
+  const maxPages = 5;
+  while (page <= maxPages) {
+    const url = `${apiUrl}/repos/${repo}/actions/runs/${runId}/jobs?per_page=100&page=${page}`;
+    const res = await httpGet(url, authHeaders);
+
+    if (res.status !== 200) {
+      core.info(`RunnerLens: GitHub API returned ${res.status} — add "permissions: actions: read" to your job for per-step breakdown`);
+      return { steps: [] };
+    }
+
+    let data: { jobs?: GitHubJob[]; total_count?: number };
+    try {
+      data = JSON.parse(res.body);
+    } catch {
+      core.info('RunnerLens: GitHub API returned non-JSON response');
+      return { steps: [] };
+    }
+
+    const pageJobs: GitHubJob[] = data.jobs ?? [];
+    jobs = jobs.concat(pageJobs);
+
+    // Stop if we've fetched all jobs or got a short page
+    if (pageJobs.length < 100 || (data.total_count && jobs.length >= data.total_count)) {
+      break;
+    }
+    page++;
   }
 
-  const data = JSON.parse(res.body);
-  const jobs: GitHubJob[] = data.jobs ?? [];
-
-  // Find current job: try exact key match, then display-name match,
-  // then fall back to the in-progress job (handles custom `name:` on jobs).
+  // Find current job. GITHUB_JOB is the workflow key (e.g. "build"), but
+  // j.name is the display name which includes matrix params (e.g.
+  // "Build (node-20, ubuntu)"). Try: exact match → prefix match → in-progress.
   const current =
     jobs.find((j) => j.name === job) ??
+    jobs.find((j) => j.name.startsWith(job + ' ') || j.name.startsWith(job + ' (')) ??
     jobs.find((j) => j.status === 'in_progress');
   if (!current) {
     core.info(`RunnerLens: could not match job "${job}" — found: ${jobs.map((j) => j.name).join(', ')}`);

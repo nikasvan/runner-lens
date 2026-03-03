@@ -4,6 +4,7 @@
 
 export interface CpuSample {
   user: number;
+  nice: number;
   system: number;
   idle: number;
   iowait: number;
@@ -96,6 +97,7 @@ export interface AggregatedReport {
   timeline?: {
     cpu_pct: number[];    // total CPU usage %, 0-100
     cpu_user: number[];   // user CPU %
+    cpu_nice: number[];   // nice CPU %
     cpu_system: number[]; // system CPU %
     mem_mb: number[];     // memory usage in MB
     mem_cached_mb: number[];  // filesystem cache in MB

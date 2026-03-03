@@ -8,7 +8,7 @@
 import * as https from 'https';
 import type { AggregatedReport } from './types';
 import { REPORT_VERSION } from './constants';
-import { fmtDuration } from './stats';
+import { fmtDuration, safeMax, safeMin } from './stats';
 
 // ── Palette ──────────────────────────────────────────────────
 
@@ -30,7 +30,12 @@ function fmtMem(mb: number): string {
 }
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function shortOsName(release: string): string {
@@ -56,6 +61,15 @@ function shortCpuModel(model: string): string {
     .trim();
   if (s.length > 24) s = s.slice(0, 21) + '...';
   return s;
+}
+
+/** Escape a string for safe embedding in a JS single-quoted string literal. */
+function escJs(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
 }
 
 // ── QuickChart HTTP helper ───────────────────────────────────
@@ -334,7 +348,7 @@ function buildSteppedChartString(
   const anns: string[] = [];
   for (let i = 0; i < steps.length; i++) {
     const m = steps[i];
-    const name = m.name.replace(/'/g, "\\'");
+    const name = escJs(m.name);
     const truncName = name.length > 20 ? name.slice(0, 17) + '...' : name;
 
     // Colored background band per step
@@ -349,19 +363,19 @@ function buildSteppedChartString(
   }
 
   const extraDS = (extraLines ?? []).map(e =>
-    `{label:'${e.label.replace(/'/g, "\\'")}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,borderWidth:1.5,borderDash:[4,3],clip:false}`
+    `{label:'${escJs(e.label)}',data:${JSON.stringify(e.data)},borderColor:'${e.color}',backgroundColor:'transparent',fill:false,tension:0.4,pointRadius:0,borderWidth:1.5,borderDash:[4,3],clip:false}`
   );
 
   /* eslint-disable no-useless-escape */
   return `{
 type:'line',
 data:{datasets:[
-  {label:'${extraDS.length > 0 ? 'total' : title.replace(/'/g, "\\'")}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
+  {label:'${extraDS.length > 0 ? 'total' : escJs(title)}',data:${data},borderColor:'${lineColor}',backgroundColor:'${fillColor}',fill:true,tension:0.4,pointRadius:0,borderWidth:2,clip:false}${extraDS.length > 0 ? ',' + extraDS.join(',') : ''}
 ]},
 options:{
   plugins:{
     legend:{display:${extraDS.length > 0 ? 'true' : 'false'}${extraDS.length > 0 ? ",labels:{boxHeight:0,boxWidth:14,font:{size:10}}" : ''}},
-    title:{display:true,text:'${title.replace(/'/g, "\\'")}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
+    title:{display:true,text:'${escJs(title)}',color:'${TITLE_COLOR}',font:{size:14,weight:'bold'},padding:{bottom:12}},
     annotation:{annotations:{${anns.join(',')}}}
   },
   scales:{
@@ -524,8 +538,8 @@ function buildGanttChartString(ganttJob: GanttJob): string {
     rows.push({ label: name, startMs: sMs, endMs: eMs, durStr: fmtDuration(Math.round((eMs - sMs) / 1000)) });
   }
 
-  const globalMin = Math.min(...rows.map((r) => r.startMs));
-  const globalMax = Math.max(...rows.map((r) => r.endMs));
+  const globalMin = safeMin(rows.map((r) => r.startMs));
+  const globalMax = safeMax(rows.map((r) => r.endMs));
   const range = globalMax - globalMin || 1;
   const minBarWidth = range * 0.015;
   const durLabelPad = range * 0.10;
@@ -647,6 +661,7 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
         chartSteps, 100,
         [
           { label: 'user', values: timeline.cpu_user, color: CPU_USER_COLOR },
+          { label: 'nice', values: timeline.cpu_nice, color: '#d2a8ff' },
           { label: 'system', values: timeline.cpu_system, color: CPU_SYS_COLOR },
         ],
       ));

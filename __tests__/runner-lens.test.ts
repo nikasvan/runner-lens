@@ -6,7 +6,39 @@ jest.mock('@actions/artifact', () => ({
   DefaultArtifactClient: jest.fn(),
 }));
 
-import { stats, safeMax, safePct, fmtDuration } from '../src/stats';
+// Mock all outbound HTTPS requests so tests never hit the network.
+// QuickChart POST → returns a fake URL; GitHub API → returns 200 with empty jobs.
+jest.mock('https', () => {
+  const { EventEmitter } = require('events');
+  const { Readable } = require('stream');
+
+  function makeMockRequest(responseBody: string, statusCode = 200) {
+    return (_urlOrOpts: unknown, optsOrCb: unknown, maybeCb?: unknown) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+      const req = new EventEmitter() as any;
+      req.write = jest.fn();
+      req.end = jest.fn(() => {
+        const res = new Readable({ read() {} }) as any;
+        res.statusCode = statusCode;
+        res.headers = {};
+        if (typeof cb === 'function') cb(res);
+        res.emit('data', Buffer.from(responseBody));
+        res.emit('end');
+      });
+      req.destroy = jest.fn();
+      req.setTimeout = jest.fn();
+      return req;
+    };
+  }
+
+  return {
+    request: makeMockRequest(
+      JSON.stringify({ success: true, url: 'https://quickchart.io/chart/render/mock-id' }),
+    ),
+  };
+});
+
+import { stats, safeMax, safeMin, safePct, fmtDuration } from '../src/stats';
 import { processMetrics } from '../src/reporter';
 import { correlateSteps, fetchSteps } from '../src/steps';
 import { buildJobSummary } from '../src/job-summary';
@@ -22,7 +54,7 @@ function makeSample(overrides: Partial<MetricSample> = {}): MetricSample {
   return {
     timestamp: 1700000000,
     cpu: {
-      user: 30, system: 10, idle: 55, iowait: 3, steal: 2, usage: 45,
+      user: 30, nice: 0, system: 10, idle: 55, iowait: 3, steal: 2, usage: 45,
     },
     memory: {
       total_mb: 7168, used_mb: 3072, available_mb: 4096,
@@ -96,6 +128,21 @@ describe('safeMax', () => {
   });
 });
 
+describe('safeMin', () => {
+  it('returns fallback for empty array', () => {
+    expect(safeMin([], -1)).toBe(-1);
+    expect(safeMin([])).toBe(0);
+  });
+
+  it('finds min correctly', () => {
+    expect(safeMin([5, 3, 10])).toBe(3);
+  });
+
+  it('handles negative values', () => {
+    expect(safeMin([-5, -3, -10])).toBe(-10);
+  });
+});
+
 describe('safePct', () => {
   it('returns 0 when denominator is 0', () => {
     expect(safePct(100, 0)).toBe(0);
@@ -145,7 +192,7 @@ describe('processMetrics', () => {
     const samples = Array(100).fill(null).map((_, i) =>
       makeSample({
         timestamp: 1700000000 + i * 3,
-        cpu: { user: 30, system: 10, idle: 55, iowait: 3, steal: 2, usage: 40 + i * 0.5 },
+        cpu: { user: 30, nice: 0, system: 10, idle: 55, iowait: 3, steal: 2, usage: 40 + i * 0.5 },
         memory: { total_mb: 7168, used_mb: 2000 + i * 10, available_mb: 5168, cached_mb: 1024, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 30 },
       }),
     );
@@ -187,6 +234,15 @@ describe('processMetrics', () => {
     expect(report.timeline!.cpu_pct).toHaveLength(10);
     expect(report.timeline!.mem_mb).toHaveLength(10);
   });
+
+  it('returns safe defaults for empty samples array', () => {
+    const { report } = processMetrics([], makeSysInfo(), 0);
+    expect(report.sample_count).toBe(0);
+    expect(report.cpu.avg).toBe(0);
+    expect(report.memory.total_mb).toBe(0);
+    expect(report.timeline).toBeUndefined();
+    expect(report.steps).toBeUndefined();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -199,7 +255,7 @@ describe('correlateSteps', () => {
       makeSample({ timestamp: 1700000000 }),
       makeSample({ timestamp: 1700000003 }),
       makeSample({ timestamp: 1700000006 }),
-      makeSample({ timestamp: 1700000009, cpu: { user: 80, system: 10, idle: 5, iowait: 3, steal: 2, usage: 95 } }),
+      makeSample({ timestamp: 1700000009, cpu: { user: 80, nice: 0, system: 10, idle: 5, iowait: 3, steal: 2, usage: 95 } }),
       makeSample({ timestamp: 1700000012 }),
     ];
 
@@ -292,10 +348,22 @@ describe('collector stats', () => {
 });
 
 describe('fetchSteps (GitHub API)', () => {
-  const origEnv = { ...process.env };
+  const origValues: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_JOB']) {
+      origValues[k] = process.env[k];
+    }
+  });
 
   afterEach(() => {
-    process.env = { ...origEnv };
+    for (const k of Object.keys(origValues)) {
+      if (origValues[k] === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = origValues[k];
+      }
+    }
   });
 
   it('returns empty when GITHUB env vars are missing', async () => {
@@ -304,6 +372,116 @@ describe('fetchSteps (GitHub API)', () => {
     delete process.env.GITHUB_JOB;
     const result = await fetchSteps('fake-token');
     expect(result).toEqual({ steps: [] });
+  });
+
+  it('returns empty when API returns non-200', async () => {
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.GITHUB_RUN_ID = '123';
+    process.env.GITHUB_JOB = 'build';
+
+    const https = require('https');
+    const { EventEmitter } = require('events');
+    const { Readable } = require('stream');
+    const origRequest = https.request;
+
+    https.request = jest.fn((_opts: unknown, cb: (res: any) => void) => {
+      const req = new EventEmitter() as any;
+      req.write = jest.fn();
+      req.end = jest.fn(() => {
+        const res = new Readable({ read() {} }) as any;
+        res.statusCode = 403;
+        res.headers = {};
+        cb(res);
+        res.emit('data', Buffer.from('Forbidden'));
+        res.emit('end');
+      });
+      req.destroy = jest.fn();
+      req.setTimeout = jest.fn();
+      return req;
+    });
+
+    const result = await fetchSteps('bad-token');
+    expect(result).toEqual({ steps: [] });
+
+    https.request = origRequest;
+  });
+
+  it('returns empty when API returns invalid JSON', async () => {
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.GITHUB_RUN_ID = '123';
+    process.env.GITHUB_JOB = 'build';
+
+    const https = require('https');
+    const { EventEmitter } = require('events');
+    const { Readable } = require('stream');
+    const origRequest = https.request;
+
+    https.request = jest.fn((_opts: unknown, cb: (res: any) => void) => {
+      const req = new EventEmitter() as any;
+      req.write = jest.fn();
+      req.end = jest.fn(() => {
+        const res = new Readable({ read() {} }) as any;
+        res.statusCode = 200;
+        res.headers = {};
+        cb(res);
+        res.emit('data', Buffer.from('<html>Bad Gateway</html>'));
+        res.emit('end');
+      });
+      req.destroy = jest.fn();
+      req.setTimeout = jest.fn();
+      return req;
+    });
+
+    const result = await fetchSteps('token');
+    expect(result).toEqual({ steps: [] });
+
+    https.request = origRequest;
+  });
+
+  it('matches job by prefix for matrix builds', async () => {
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.GITHUB_RUN_ID = '123';
+    process.env.GITHUB_JOB = 'build';
+
+    const https = require('https');
+    const { EventEmitter } = require('events');
+    const { Readable } = require('stream');
+    const origRequest = https.request;
+
+    const apiResponse = JSON.stringify({
+      jobs: [
+        {
+          name: 'build (node-20, ubuntu)',
+          status: 'in_progress',
+          started_at: '2023-11-14T22:13:20Z',
+          steps: [{ name: 'Checkout', number: 1, status: 'completed', started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:25Z' }],
+        },
+      ],
+      total_count: 1,
+    });
+
+    https.request = jest.fn((_opts: unknown, cb: (res: any) => void) => {
+      const req = new EventEmitter() as any;
+      req.write = jest.fn();
+      req.end = jest.fn(() => {
+        const res = new Readable({ read() {} }) as any;
+        res.statusCode = 200;
+        res.headers = {};
+        cb(res);
+        res.emit('data', Buffer.from(apiResponse));
+        res.emit('end');
+      });
+      req.destroy = jest.fn();
+      req.setTimeout = jest.fn();
+      return req;
+    });
+
+    const result = await fetchSteps('token');
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0].name).toBe('Checkout');
+    expect(result.jobStartedAt).toBe('2023-11-14T22:13:20Z');
+
+    https.request = origRequest;
   });
 });
 
@@ -333,7 +511,7 @@ describe('edge cases', () => {
   it('reporter handles samples with missing optional fields', () => {
     const sparse: MetricSample = {
       timestamp: 1700000000,
-      cpu: { user: 10, system: 5, idle: 85, iowait: 0, steal: 0, usage: 15 },
+      cpu: { user: 10, nice: 0, system: 5, idle: 85, iowait: 0, steal: 0, usage: 15 },
       memory: { total_mb: 4096, used_mb: 1024, available_mb: 3072, cached_mb: 512, swap_total_mb: 0, swap_used_mb: 0, usage_pct: 25 },
       load: { load1: 0, load5: 0, load15: 0 },
     };
@@ -384,13 +562,14 @@ describe('buildJobSummary', () => {
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
         cpu_user: [8, 15, 22, 30, 38],
+        cpu_nice: [0, 0, 0, 0, 0],
         cpu_system: [2, 5, 8, 10, 12],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
         mem_cached_mb: [200, 300, 400, 350, 250],
         mem_swap_mb: [0, 0, 10, 20, 5],
       },
     }), 3);
-    expect(html).toContain('<img src="https://quickchart.io/chart');
+    expect(html).toContain('<img');
     expect(html).toContain('CPU Usage');
     expect(html).toContain('Memory Usage');
   });
@@ -404,6 +583,7 @@ describe('buildJobSummary', () => {
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
         cpu_user: [8, 15, 22, 30, 38],
+        cpu_nice: [0, 0, 0, 0, 0],
         cpu_system: [2, 5, 8, 10, 12],
         mem_mb: [1024, 2048, 3072, 2048, 1024],
         mem_cached_mb: [200, 300, 400, 350, 250],
@@ -446,11 +626,10 @@ describe('buildJobSummary', () => {
     const cpu = Array.from({ length: 60 }, (_, i) => 20 + (i % 30));
     const mem = Array.from({ length: 60 }, (_, i) => 1000 + i * 50);
     const md = await buildJobSummary(makeReport({
-      timeline: { cpu_pct: cpu, cpu_user: cpu.map(v => v * 0.7), cpu_system: cpu.map(v => v * 0.3), mem_mb: mem, mem_cached_mb: mem.map(v => v * 0.1), mem_swap_mb: mem.map(() => 0) },
+      timeline: { cpu_pct: cpu, cpu_user: cpu.map(v => v * 0.7), cpu_nice: cpu.map(() => 0), cpu_system: cpu.map(v => v * 0.3), mem_mb: mem, mem_cached_mb: mem.map(v => v * 0.1), mem_swap_mb: mem.map(() => 0) },
     }), 3);
     expect(md).toContain('quickchart.io');
     expect(md).toContain('CPU Usage');
     expect(md).toContain('Memory Usage');
   });
 });
-

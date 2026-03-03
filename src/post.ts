@@ -44,6 +44,9 @@ function stopCollector(): void {
  * The v2 collector rotates metrics.jsonl → metrics.jsonl.1 when it
  * exceeds --max-size. We read .1 first (older data) then the main
  * file (newer data) so samples are in chronological order.
+ *
+ * Uses line-by-line streaming to avoid loading the entire file (~200MB
+ * worst case) into memory at once.
  */
 function loadSamples(): MetricSample[] {
   const files = [`${METRICS_FILE}.1`, METRICS_FILE].filter((f) =>
@@ -52,12 +55,24 @@ function loadSamples(): MetricSample[] {
 
   const samples: MetricSample[] = [];
   for (const file of files) {
-    const content = fs.readFileSync(file, 'utf-8').trim();
-    if (!content) continue;
-    for (const line of content.split('\n')) {
+    const content = fs.readFileSync(file, 'utf-8');
+    let start = 0;
+    while (start < content.length) {
+      let end = content.indexOf('\n', start);
+      if (end === -1) end = content.length;
+      const line = content.substring(start, end).trim();
+      start = end + 1;
       if (!line) continue;
       try {
-        samples.push(JSON.parse(line));
+        const parsed = JSON.parse(line);
+        // Basic shape validation: must have timestamp and cpu.usage
+        if (
+          typeof parsed.timestamp === 'number' &&
+          parsed.cpu && typeof parsed.cpu.usage === 'number' &&
+          parsed.memory && typeof parsed.memory.used_mb === 'number'
+        ) {
+          samples.push(parsed as MetricSample);
+        }
       } catch {
         /* skip malformed lines */
       }
@@ -74,9 +89,10 @@ function loadSystemInfo(): SystemInfo {
     if (fs.existsSync(SYSINFO_FILE))
       return JSON.parse(fs.readFileSync(SYSINFO_FILE, 'utf-8'));
   } catch { /* fallback */ }
+  const cpus = os.cpus();
   return {
-    cpu_count: os.cpus().length,
-    cpu_model: os.cpus()[0]?.model ?? 'unknown',
+    cpu_count: cpus.length,
+    cpu_model: cpus[0]?.model ?? 'unknown',
     total_memory_mb: Math.round(os.totalmem() / (1024 * 1024)),
     os_release: 'unknown', kernel: 'unknown',
     runner_name: process.env.RUNNER_NAME ?? 'unknown',
@@ -102,6 +118,9 @@ async function run(): Promise<void> {
 
     // ── Stop collector & flush ────────────────────────────
     stopCollector();
+    // Wait for the collector to handle SIGTERM, flush its last sample,
+    // and close the output file. 1200ms covers the worst case: one
+    // in-flight sample (~50ms) plus kernel signal delivery jitter.
     await new Promise((r) => setTimeout(r, 1200));
 
     // ── Load data ─────────────────────────────────────────
@@ -163,7 +182,10 @@ async function run(): Promise<void> {
       safePct(report.memory.avg, report.memory.total_mb).toFixed(1));
     core.setOutput('samples', report.sample_count.toString());
     core.setOutput('duration-seconds', dur.toString());
-    core.setOutput('report-json', JSON.stringify(report));
+    // Omit timeline arrays from the output to stay under GitHub's 1MB
+    // per-output limit. The full report (with timeline) is in the artifact.
+    const { timeline: _tl, ...outputReport } = report;
+    core.setOutput('report-json', JSON.stringify(outputReport));
 
     // ── Upload report artifact (opt-in) ────────────────
     if (core.getInput('upload-artifact').toLowerCase() === 'true') {

@@ -13,10 +13,11 @@ function intInput(name: string, fallback: number): number {
 }
 
 export function parseConfig(): MonitorConfig {
-  // Auto-detect: explicit input → GITHUB_TOKEN env → ACTIONS_RUNTIME_TOKEN env
+  // Auto-detect: explicit input → GITHUB_TOKEN env.
+  // ACTIONS_RUNTIME_TOKEN is intentionally excluded — it typically lacks
+  // actions:read permission, producing confusing 403 errors.
   const githubToken = core.getInput('github-token')
     || process.env.GITHUB_TOKEN
-    || process.env.ACTIONS_RUNTIME_TOKEN
     || '';
 
   return {

@@ -1,5 +1,10 @@
 import type { MetricStats } from './types';
 
+/**
+ * Nearest-rank percentile. For P0 returns the smallest element, for P100
+ * the largest. This matches the "ceiling" variant of the nearest-rank
+ * method (used by Excel's PERCENTILE.INC).
+ */
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   const idx = Math.ceil((p / 100) * sorted.length) - 1;
@@ -32,6 +37,16 @@ export function safeMax(values: number[], fallback = 0): number {
   let m = values[0];
   for (let i = 1; i < values.length; i++) {
     if (values[i] > m) m = values[i];
+  }
+  return m;
+}
+
+/** Stack-safe min. Mirrors safeMax. */
+export function safeMin(values: number[], fallback = 0): number {
+  if (values.length === 0) return fallback;
+  let m = values[0];
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] < m) m = values[i];
   }
   return m;
 }

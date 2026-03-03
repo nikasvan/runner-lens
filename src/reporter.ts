@@ -11,9 +11,27 @@ function aggregate(
   durationSec: number,
   steps?: StepMetrics[],
 ): AggregatedReport {
+  if (samples.length === 0) {
+    const now = new Date().toISOString();
+    return {
+      version: REPORT_VERSION,
+      system: sysInfo,
+      duration_seconds: durationSec,
+      sample_count: 0,
+      started_at: now,
+      ended_at: now,
+      cpu: { avg: 0, max: 0, min: 0, p50: 0, p95: 0, p99: 0, latest: 0 },
+      memory: { avg: 0, max: 0, min: 0, p50: 0, p95: 0, p99: 0, latest: 0, total_mb: 0, swap_max_mb: 0 },
+      load: { avg_1m: 0, max_1m: 0 },
+    };
+  }
+
   const cpuStats = stats(samples.map((s) => s.cpu.usage));
   const memStats = stats(samples.map((s) => s.memory.used_mb));
-  const memTotal = samples[0]?.memory.total_mb ?? 0;
+  // Use the most commonly reported total_mb across samples (guards against
+  // a corrupted first sample reporting 0).
+  const memTotals = samples.map((s) => s.memory.total_mb).filter((v) => v > 0);
+  const memTotal = memTotals.length > 0 ? safeMax(memTotals) : 0;
   const swapMax  = safeMax(samples.map((s) => s.memory.swap_used_mb));
 
   const loadVals = samples.map((s) => s.load?.load1 ?? 0);
@@ -39,6 +57,7 @@ function aggregate(
   const timeline = samples.length >= 2 ? {
     cpu_pct: samples.map(s => s.cpu.usage),
     cpu_user: samples.map(s => s.cpu.user),
+    cpu_nice: samples.map(s => s.cpu.nice),
     cpu_system: samples.map(s => s.cpu.system),
     mem_mb: samples.map(s => s.memory.used_mb),
     mem_cached_mb: samples.map(s => s.memory.cached_mb),

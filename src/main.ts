@@ -59,6 +59,15 @@ async function run(): Promise<void> {
 
     fs.writeFileSync(PID_FILE, child.pid.toString());
 
+    // Brief delay then verify the process is still alive.
+    // Catches immediate failures (bad shebang, missing /proc, etc.).
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      process.kill(child.pid, 0); // signal 0 = existence check
+    } catch {
+      throw new Error(`Collector exited immediately (PID ${child.pid})`);
+    }
+
     core.info(`RunnerLens: collector started (PID ${child.pid})`);
 
     // ── Persist state for the post step ───────────────────

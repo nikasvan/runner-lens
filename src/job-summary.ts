@@ -541,7 +541,8 @@ function buildGanttChartString(ganttJob: GanttJob): string {
   const globalMin = safeMin(rows.map((r) => r.startMs));
   const globalMax = safeMax(rows.map((r) => r.endMs));
   const range = globalMax - globalMin || 1;
-  const minBarWidth = range * 0.015;
+  // Just enough to render a visible sliver for 0-duration steps
+  const minBarWidth = range * 0.003;
   const durLabelPad = range * 0.10;
 
   const labels = JSON.stringify(rows.map((r) => r.label));

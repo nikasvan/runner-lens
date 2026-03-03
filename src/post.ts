@@ -192,7 +192,7 @@ async function run(): Promise<void> {
 
     // ── Job Summary ─────────────────────────────────────
     try {
-      const summaryHtml = buildJobSummary(report, config.sampleInterval);
+      const summaryHtml = await buildJobSummary(report, config.sampleInterval);
       await core.summary.addRaw(summaryHtml).write();
     } catch (e) {
       core.debug(`RunnerLens: job summary failed — ${e}`);

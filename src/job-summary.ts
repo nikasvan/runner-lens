@@ -417,18 +417,15 @@ function buildQuickChart(
       });
 
     // Progressively keep only the longest-duration steps until URL fits.
+    // Axis range is locked to the data range — step bands that extend
+    // beyond the first/last sample are clipped by Chart.js, avoiding
+    // empty space on either side of the chart.
     let visibleSteps = steps;
     while (visibleSteps.length > 0) {
       const regions = toRegions(visibleSteps);
-      let xMin = chartStartMs;
-      let xMax = chartEndMs;
-      for (const r of regions) {
-        xMin = Math.min(xMin, r.startMs);
-        xMax = Math.max(xMax, r.endMs);
-      }
 
       const chartStr = buildSteppedChartString(
-        title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, regions, yMax, extraXY,
+        title, dataPoints, lineColor, fillColor, yLabel, chartStartMs, chartEndMs, regions, yMax, extraXY,
       );
       const url = chartGetUrl(chartStr, 1024, 300);
       if (url.length <= MAX_URL_LEN) {

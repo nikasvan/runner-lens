@@ -75,9 +75,9 @@ function escJs(s: string): string {
 // ── QuickChart GET URL builder ────────────────────────────────
 
 // Safe limit for GET URLs. QuickChart supports ~16K, but proxies
-// and CDNs (CloudFront, GitHub's markdown renderer) may truncate
-// around 8K. Beyond this limit, charts silently break.
-const MAX_URL_LEN = 8000;
+// GitHub's Camo proxy hex-encodes URLs, roughly doubling their length.
+// A 4K source URL becomes ~8K after encoding, staying under proxy limits.
+const MAX_URL_LEN = 4000;
 
 function chartGetUrl(config: string | Record<string, unknown>, width: number, height: number): string {
   const configStr = typeof config === 'string' ? config : JSON.stringify(config);

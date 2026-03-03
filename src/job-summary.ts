@@ -464,10 +464,9 @@ async function buildQuickChart(
         };
       });
 
-    for (const r of stepRegions) {
-      xMin = Math.min(xMin, r.startMs);
-      xMax = Math.max(xMax, r.endMs);
-    }
+    // Axis range is locked to the data range — step bands that extend
+    // beyond the first/last sample are clipped by Chart.js, avoiding
+    // empty space on either side of the chart.
 
     const extraXY = extras.map(e => ({ label: e.label, data: toXY(e.data), color: e.color }));
 

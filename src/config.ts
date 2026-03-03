@@ -21,7 +21,7 @@ export function parseConfig(): MonitorConfig {
     || '';
 
   return {
-    sampleInterval: clamp(intInput('sample-interval', 3), 1, 30),
+    sampleInterval: clamp(intInput('sample-interval', 5), 1, 60),
     maxSizeMb: Math.max(0, intInput('max-file-size', 100)),
     githubToken,
   };

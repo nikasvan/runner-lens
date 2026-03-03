@@ -6,8 +6,8 @@ jest.mock('@actions/artifact', () => ({
   DefaultArtifactClient: jest.fn(),
 }));
 
-// Mock all outbound HTTPS requests so tests never hit the network.
-// QuickChart POST → returns a fake URL; GitHub API → returns 200 with empty jobs.
+// Mock outbound HTTPS requests so tests never hit the network.
+// Used by steps.ts (GitHub API) — job-summary.ts uses GET URLs (no network).
 jest.mock('https', () => {
   const { EventEmitter } = require('events');
   const { Readable } = require('stream');
@@ -33,7 +33,7 @@ jest.mock('https', () => {
 
   return {
     request: makeMockRequest(
-      JSON.stringify({ success: true, url: 'https://quickchart.io/chart/render/mock-id' }),
+      JSON.stringify({ jobs: [], total_count: 0 }),
     ),
   };
 });
@@ -66,7 +66,7 @@ function makeSample(overrides: Partial<MetricSample> = {}): MetricSample {
   };
 }
 
-function makeSysInfo(): SystemInfo {
+function makeSysInfo(overrides: Partial<SystemInfo> = {}): SystemInfo {
   return {
     cpu_count: 2,
     cpu_model: 'AMD EPYC',
@@ -76,6 +76,7 @@ function makeSysInfo(): SystemInfo {
     runner_name: 'GitHub Actions 2',
     runner_os: 'Linux',
     runner_arch: 'X64',
+    ...overrides,
   };
 }
 
@@ -88,7 +89,6 @@ describe('stats', () => {
     const s = stats([]);
     expect(s.avg).toBe(0);
     expect(s.max).toBe(0);
-    expect(s.p95).toBe(0);
   });
 
   it('computes correct stats for a known dataset', () => {
@@ -97,7 +97,6 @@ describe('stats', () => {
     expect(s.avg).toBe(55);
     expect(s.min).toBe(10);
     expect(s.max).toBe(100);
-    expect(s.p50).toBe(50);
     expect(s.latest).toBe(100);
   });
 
@@ -106,8 +105,6 @@ describe('stats', () => {
     expect(s.avg).toBe(42);
     expect(s.min).toBe(42);
     expect(s.max).toBe(42);
-    expect(s.p50).toBe(42);
-    expect(s.p95).toBe(42);
   });
 });
 
@@ -243,6 +240,12 @@ describe('processMetrics', () => {
     expect(report.timeline).toBeUndefined();
     expect(report.steps).toBeUndefined();
   });
+
+  it('preserves metric_source in system info', () => {
+    const s = makeSample();
+    const { report } = processMetrics([s, s], makeSysInfo({ metric_source: 'cgroup' }), 6);
+    expect(report.system.metric_source).toBe('cgroup');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -323,27 +326,6 @@ describe('correlateSteps', () => {
     );
     expect(steps).toHaveLength(1);
     expect(steps[0].name).toBe('Done');
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// collector self-monitoring
-// ─────────────────────────────────────────────────────────────
-
-describe('collector stats', () => {
-  it('includes collector overhead in report', () => {
-    const s = makeSample({ collector: { cpu_pct: 0.3, mem_mb: 4.0 } });
-    const { report } = processMetrics([s, s], makeSysInfo(), 6);
-    expect(report.collector).toBeDefined();
-    expect(report.collector!.avg_cpu_pct).toBeCloseTo(0.3);
-    expect(report.collector!.avg_mem_mb).toBeCloseTo(4.0);
-    expect(report.collector!.max_mem_mb).toBeCloseTo(4.0);
-  });
-
-  it('omits collector stats when samples lack collector field', () => {
-    const s = makeSample({ collector: undefined });
-    const { report } = processMetrics([s], makeSysInfo(), 3);
-    expect(report.collector).toBeUndefined();
   });
 });
 
@@ -516,7 +498,7 @@ describe('edge cases', () => {
       load: { load1: 0, load5: 0, load15: 0 },
     };
     const { report } = processMetrics([sparse], makeSysInfo(), 3);
-    expect(report.collector).toBeUndefined();
+    expect(report.cpu.avg).toBe(15);
   });
 });
 
@@ -543,22 +525,29 @@ describe('buildJobSummary', () => {
       sample_count: 100,
       started_at: '2023-11-14T22:13:20Z',
       ended_at: '2023-11-14T22:18:20Z',
-      cpu: { avg: 45, max: 92, min: 5, p50: 42, p95: 85, p99: 90, latest: 70 },
-      memory: { avg: 3072, max: 5120, min: 1024, p50: 3000, p95: 4800, p99: 5000, latest: 3500, total_mb: 7168, swap_max_mb: 0 },
+      cpu: { avg: 45, max: 92, min: 5, latest: 70 },
+      memory: { avg: 3072, max: 5120, min: 1024, latest: 3500, total_mb: 7168, swap_max_mb: 0 },
       load: { avg_1m: 1.5, max_1m: 3.2 },
       ...overrides,
     };
   }
 
-  it('produces summary with stat cards image and footer', async () => {
-    const md = await buildJobSummary(makeReport(), 3);
+  it('produces summary with stat cards image and footer', () => {
+    const md = buildJobSummary(makeReport(), 3);
     expect(md).toContain('<img');
     expect(md).toContain('Runner Stats');
     expect(md).toContain('RunnerLens');
   });
 
-  it('includes QuickChart CPU and Memory charts when timeline has >= 2 points', async () => {
-    const html = await buildJobSummary(makeReport({
+  it('generates GET URLs (not expiring POST short URLs)', () => {
+    const md = buildJobSummary(makeReport(), 3);
+    expect(md).toContain('quickchart.io/chart?');
+    expect(md).not.toContain('/chart/render/');
+    expect(md).not.toContain('/chart/create');
+  });
+
+  it('includes QuickChart CPU and Memory charts when timeline has >= 2 points', () => {
+    const html = buildJobSummary(makeReport({
       timeline: {
         cpu_pct: [10, 20, 30, 40, 50],
         cpu_user: [8, 15, 22, 30, 38],
@@ -574,8 +563,8 @@ describe('buildJobSummary', () => {
     expect(html).toContain('Memory Usage');
   });
 
-  it('includes Gantt chart image when steps are present', async () => {
-    const html = await buildJobSummary(makeReport({
+  it('includes Gantt chart image when steps are present', () => {
+    const html = buildJobSummary(makeReport({
       steps: [
         { name: 'Checkout', number: 1, duration_seconds: 6, cpu_avg: 20, cpu_max: 40, mem_avg_mb: 1024, mem_max_mb: 2048, sample_count: 2, started_at: '2023-11-14T22:13:20Z', completed_at: '2023-11-14T22:13:26Z' },
         { name: 'Build', number: 2, duration_seconds: 60, cpu_avg: 60, cpu_max: 92, mem_avg_mb: 3072, mem_max_mb: 5120, sample_count: 20, started_at: '2023-11-14T22:13:27Z', completed_at: '2023-11-14T22:14:27Z' },
@@ -594,16 +583,16 @@ describe('buildJobSummary', () => {
     expect(html).toContain('Execution Timeline');
   });
 
-  it('skips line charts when no timeline data', async () => {
-    const md = await buildJobSummary(makeReport({ timeline: undefined }), 3);
+  it('skips line charts when no timeline data', () => {
+    const md = buildJobSummary(makeReport({ timeline: undefined }), 3);
     // Stat cards image is still present
     expect(md).toContain('Runner Stats');
     // But no CPU/Memory line charts
     expect(md).not.toContain('CPU Usage');
   });
 
-  it('includes footer with version', async () => {
-    const html = await buildJobSummary(makeReport(), 3);
+  it('includes footer with version', () => {
+    const html = buildJobSummary(makeReport(), 3);
     expect(html).toContain('v1.0.0');
     expect(html).toContain('runnerlens/runner-lens');
   });
@@ -613,19 +602,19 @@ describe('buildJobSummary', () => {
     expect(fmtDuration(120)).toBe('2m');
   });
 
-  it('formats memory < 1024 MB as MB (fmtMem via stat cards)', async () => {
+  it('formats memory < 1024 MB as MB (fmtMem via stat cards)', () => {
     // Value is baked into the stat cards image; verify the summary still builds
-    const md = await buildJobSummary(makeReport({
-      memory: { avg: 512, max: 800, min: 100, p50: 500, p95: 750, p99: 780, latest: 600, total_mb: 1024, swap_max_mb: 0 },
+    const md = buildJobSummary(makeReport({
+      memory: { avg: 512, max: 800, min: 100, latest: 600, total_mb: 1024, swap_max_mb: 0 },
     }), 3);
     expect(md).toContain('Runner Stats');
     expect(md).toContain('RunnerLens');
   });
 
-  it('downsamples long timelines and skips labels', async () => {
+  it('downsamples long timelines and skips labels', () => {
     const cpu = Array.from({ length: 60 }, (_, i) => 20 + (i % 30));
     const mem = Array.from({ length: 60 }, (_, i) => 1000 + i * 50);
-    const md = await buildJobSummary(makeReport({
+    const md = buildJobSummary(makeReport({
       timeline: { cpu_pct: cpu, cpu_user: cpu.map(v => v * 0.7), cpu_nice: cpu.map(() => 0), cpu_system: cpu.map(v => v * 0.3), mem_mb: mem, mem_cached_mb: mem.map(v => v * 0.1), mem_swap_mb: mem.map(() => 0) },
     }), 3);
     expect(md).toContain('quickchart.io');

@@ -1,29 +1,22 @@
 import type { MetricStats } from './types';
 
-/**
- * Nearest-rank percentile. For P0 returns the smallest element, for P100
- * the largest. This matches the "ceiling" variant of the nearest-rank
- * method (used by Excel's PERCENTILE.INC).
- */
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const idx = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.max(0, idx)];
-}
-
 export function stats(values: number[]): MetricStats {
   if (values.length === 0) {
-    return { avg: 0, max: 0, min: 0, p50: 0, p95: 0, p99: 0, latest: 0 };
+    return { avg: 0, max: 0, min: 0, latest: 0 };
   }
-  const sorted = [...values].sort((a, b) => a - b);
-  const sum = values.reduce((s, v) => s + v, 0);
+  let sum = 0;
+  let min = values[0];
+  let max = values[0];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    sum += v;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
   return {
     avg:    sum / values.length,
-    min:    sorted[0],
-    max:    sorted[sorted.length - 1],
-    p50:    percentile(sorted, 50),
-    p95:    percentile(sorted, 95),
-    p99:    percentile(sorted, 99),
+    min,
+    max,
     latest: values[values.length - 1],
   };
 }

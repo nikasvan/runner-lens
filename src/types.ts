@@ -50,6 +50,7 @@ export interface SystemInfo {
   runner_name: string;
   runner_os: string;
   runner_arch: string;
+  metric_source?: string;
 }
 
 export interface MonitorConfig {
@@ -62,9 +63,6 @@ export interface MetricStats {
   avg: number;
   max: number;
   min: number;
-  p50: number;
-  p95: number;
-  p99: number;
   latest: number;
 }
 
@@ -103,6 +101,4 @@ export interface AggregatedReport {
     mem_cached_mb: number[];  // filesystem cache in MB
     mem_swap_mb: number[];    // swap usage in MB
   };
-  collector?: { avg_cpu_pct: number; avg_mem_mb: number; max_mem_mb: number };
-  reporter?: { cpu_pct: number; mem_mb: number };
 }

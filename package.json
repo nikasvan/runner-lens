@@ -13,8 +13,7 @@
   },
   "dependencies": {
     "@actions/artifact": "^6.2.0",
-    "@actions/core": "^1.11.1",
-    "@actions/exec": "^1.1.1"
+    "@actions/core": "^1.11.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

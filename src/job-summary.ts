@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────────────────────
 // RunnerLens — Job Summary Builder
 //
-// Uses QuickChart.io for all visuals: stat cards, CPU/Memory
-// line charts, and Gantt execution timeline.
+// Generates QuickChart.io GET URLs for all visuals. GET URLs
+// embed the full chart config in the URL itself — they never
+// expire and require no API calls during generation.
 // ─────────────────────────────────────────────────────────────
 
-import * as https from 'https';
 import type { AggregatedReport } from './types';
 import { REPORT_VERSION } from './constants';
 import { fmtDuration, safeMax, safeMin } from './stats';
@@ -72,38 +72,31 @@ function escJs(s: string): string {
     .replace(/\r/g, '\\r');
 }
 
-// ── QuickChart HTTP helper ───────────────────────────────────
+// ── QuickChart GET URL builder ────────────────────────────────
 
-function postQuickChart(body: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const req = https.request(
-      'https://quickchart.io/chart/create',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      },
-      (res) => {
-        let data = '';
-        res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data) as { success: boolean; url: string };
-            if (parsed.success && parsed.url) {
-              resolve(parsed.url);
-            } else {
-              reject(new Error(`QuickChart API error: ${data}`));
-            }
-          } catch {
-            reject(new Error(`QuickChart response parse error: ${data}`));
-          }
-        });
-      },
-    );
-    req.on('error', reject);
-    req.setTimeout(5000, () => { req.destroy(); reject(new Error('QuickChart timeout')); });
-    req.write(body);
-    req.end();
-  });
+// Safe limit for GET URLs. QuickChart supports ~16K, but proxies
+// and CDNs (CloudFront, GitHub's markdown renderer) may truncate
+// around 8K. Beyond this limit, charts silently break.
+const MAX_URL_LEN = 8000;
+
+function chartGetUrl(config: string | Record<string, unknown>, width: number, height: number): string {
+  const configStr = typeof config === 'string' ? config : JSON.stringify(config);
+  const encoded = encodeURIComponent(configStr);
+  const bkg = encodeURIComponent(CHART_BG);
+  return `https://quickchart.io/chart?v=${CHART_VERSION}&c=${encoded}&w=${width}&h=${height}&bkg=${bkg}&f=png&devicePixelRatio=2`;
+}
+
+/** Keep only the N longest-duration items, preserving chronological order. */
+function keepLongest<T extends { started_at: string; completed_at: string }>(
+  items: T[], n: number,
+): T[] {
+  if (items.length <= n) return items;
+  return items
+    .map((item, idx) => ({ item, idx, dur: new Date(item.completed_at).getTime() - new Date(item.started_at).getTime() }))
+    .sort((a, b) => b.dur - a.dur)
+    .slice(0, n)
+    .sort((a, b) => a.idx - b.idx)
+    .map(e => e.item);
 }
 
 // ── Stat Cards (rendered as image via chartjs-plugin-annotation) ──
@@ -175,39 +168,12 @@ function buildStatCardsConfig(report: AggregatedReport): Record<string, any> {
   };
 }
 
-async function buildStatCardsImage(report: AggregatedReport): Promise<string> {
+function buildStatCardsImage(report: AggregatedReport): string {
   const config = buildStatCardsConfig(report);
-  const body = JSON.stringify({
-    version: CHART_VERSION,
-    backgroundColor: CHART_BG,
-    width: 1024,
-    height: 100,
-    devicePixelRatio: 2,
-    format: 'png',
-    chart: config,
-  });
-  const url = await postQuickChart(body);
+  const url = chartGetUrl(config, 1024, 100);
   return `<img src="${url}" alt="Runner Stats" width="100%">`;
 }
 
-/** Markdown fallback if image rendering fails */
-function buildStatCardsFallback(report: AggregatedReport): string {
-  const runnerValue = report.system.os_release !== 'unknown'
-    ? shortOsName(report.system.os_release)
-    : `${report.system.runner_os} (${report.system.runner_arch})`;
-  const cpuModel = shortCpuModel(report.system.cpu_model);
-  const specs = `${cpuModel} \u00b7 ${report.system.cpu_count} vCPU \u00b7 ${fmtMem(report.system.total_memory_mb)}`;
-  const dur = fmtDuration(report.duration_seconds);
-
-  return [
-    `> **${runnerValue}** \u00b7 ${specs} \u00b7 **${dur}**`,
-    '',
-    '| Metric | Average | Peak |',
-    '|:--|--:|--:|',
-    `| **CPU** | ${report.cpu.avg.toFixed(1)}% | ${report.cpu.max.toFixed(1)}% |`,
-    `| **Memory** | ${fmtMem(report.memory.avg)} | ${fmtMem(report.memory.max)} / ${fmtMem(report.memory.total_mb)} |`,
-  ].join('\n');
-}
 
 // ── QuickChart.io CPU/Memory Charts ─────────────────────────
 
@@ -401,22 +367,13 @@ options:{
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const QUICKCHART_URL_LIMIT = 1800;
-
-function buildChartUrl(config: Record<string, unknown>): string {
-  const json = JSON.stringify(config);
-  const encoded = encodeURIComponent(json);
-  const bkg = encodeURIComponent(CHART_BG);
-  return `https://quickchart.io/chart?v=${CHART_VERSION}&c=${encoded}&w=1024&h=250&bkg=${bkg}&f=png&devicePixelRatio=2`;
-}
-
 interface ExtraLine {
   label: string;
   values: number[];
   color: string;
 }
 
-async function buildQuickChart(
+function buildQuickChart(
   title: string,
   values: number[],
   yLabel: string,
@@ -427,7 +384,7 @@ async function buildQuickChart(
   steps?: { name: string; started_at: string; completed_at: string }[],
   yMax?: number,
   extraLines?: ExtraLine[],
-): Promise<string> {
+): string {
   const maxPts = 30;
   const data = downsample(values, maxPts);
   const chartStartMs = new Date(startedAt).getTime();
@@ -439,82 +396,59 @@ async function buildQuickChart(
     color: l.color,
   }));
 
-  // ── Steps present: use linear time axis so ALL steps are visible ──
+  // ── Steps present: use linear time axis with step annotations ──
   if (steps && steps.length > 0) {
     const toXY = (d: number[]) => d.map((v, i) => ({
       x: chartStartMs + (chartEndMs - chartStartMs) * i / Math.max(d.length - 1, 1),
       y: v,
     }));
     const dataPoints = toXY(data);
+    const extraXY = extras.map(e => ({ label: e.label, data: toXY(e.data), color: e.color }));
 
-    let xMin = chartStartMs;
-    let xMax = chartEndMs;
     const totalRange = chartEndMs - chartStartMs;
     const minStepMs = totalRange * 0.015;
 
-    const stepRegions = steps
-      .filter(s => s.started_at && s.completed_at)
-      .map(s => {
-        const sMs = new Date(s.started_at).getTime();
-        const eMs = new Date(s.completed_at).getTime();
-        return {
-          name: s.name,
-          startMs: sMs,
-          endMs: eMs <= sMs ? sMs + minStepMs : eMs,
-        };
+    const toRegions = (s: typeof steps) => s
+      .filter(st => st.started_at && st.completed_at)
+      .map(st => {
+        const sMs = new Date(st.started_at).getTime();
+        const eMs = new Date(st.completed_at).getTime();
+        return { name: st.name, startMs: sMs, endMs: eMs <= sMs ? sMs + minStepMs : eMs };
       });
 
-    for (const r of stepRegions) {
-      xMin = Math.min(xMin, r.startMs);
-      xMax = Math.max(xMax, r.endMs);
+    // Progressively keep only the longest-duration steps until URL fits.
+    let visibleSteps = steps;
+    while (visibleSteps.length > 0) {
+      const regions = toRegions(visibleSteps);
+      let xMin = chartStartMs;
+      let xMax = chartEndMs;
+      for (const r of regions) {
+        xMin = Math.min(xMin, r.startMs);
+        xMax = Math.max(xMax, r.endMs);
+      }
+
+      const chartStr = buildSteppedChartString(
+        title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, regions, yMax, extraXY,
+      );
+      const url = chartGetUrl(chartStr, 1024, 300);
+      if (url.length <= MAX_URL_LEN) {
+        return `<img src="${url}" alt="${esc(title)}" width="100%">`;
+      }
+      visibleSteps = keepLongest(visibleSteps, Math.max(1, Math.floor(visibleSteps.length * 0.6)));
     }
-
-    const extraXY = extras.map(e => ({ label: e.label, data: toXY(e.data), color: e.color }));
-
-    const chartStr = buildSteppedChartString(
-      title, dataPoints, lineColor, fillColor, yLabel, xMin, xMax, stepRegions, yMax, extraXY,
-    );
-    const body = JSON.stringify({
-      version: CHART_VERSION,
-      backgroundColor: CHART_BG,
-      width: 1024,
-      height: 300,
-      devicePixelRatio: 2,
-      format: 'png',
-      chart: chartStr,
-    });
-    const url = await postQuickChart(body);
-    return `<img src="${url}" alt="${esc(title)}" width="100%">`;
   }
 
-  // ── No steps: use category axis (supports compact GET URLs) ──
+  // ── No steps: use category axis ──
   const labels = timeLabels(startedAt, endedAt, data.length);
   const extraCat = extras.map(e => ({ label: e.label, data: e.data, color: e.color }));
   const config = buildChartConfig(title, data, labels, lineColor, fillColor, yLabel, extraCat);
-  let url = buildChartUrl(config);
-  if (url.length > QUICKCHART_URL_LIMIT) {
-    const body = JSON.stringify({
-      version: CHART_VERSION,
-      backgroundColor: CHART_BG,
-      width: 1024,
-      height: 250,
-      devicePixelRatio: 2,
-      format: 'png',
-      chart: config,
-    });
-    try {
-      url = await postQuickChart(body);
-    } catch {
-      // If POST fails, use long GET URL anyway
-    }
-  }
+  const url = chartGetUrl(config, 1024, 250);
   return `<img src="${url}" alt="${esc(title)}" width="100%">`;
 }
 
 // ── Gantt Timeline (QuickChart.io horizontal bar chart) ──────
 
 interface GanttJob {
-  jobName: string;
   steps: { name: string; started_at: string; completed_at: string }[];
 }
 
@@ -522,7 +456,7 @@ const GANTT_COLOR = '#2f81f7';
 
 function collectGanttSteps(report: AggregatedReport): GanttJob | null {
   if (report.steps && report.steps.length > 0) {
-    return { jobName: process.env.GITHUB_JOB || 'Job', steps: report.steps };
+    return { steps: report.steps };
   }
   return null;
 }
@@ -596,53 +530,30 @@ options:{
   /* eslint-enable no-useless-escape */
 }
 
-async function buildGanttChart(ganttJob: GanttJob): Promise<string> {
-  const height = Math.max(160, Math.min(700, 56 + ganttJob.steps.length * 26));
-  const chartStr = buildGanttChartString(ganttJob);
-
-  const body = JSON.stringify({
-    version: CHART_VERSION,
-    backgroundColor: CHART_BG,
-    width: 1024,
-    height,
-    devicePixelRatio: 2,
-    format: 'png',
-    chart: chartStr,
-  });
-
-  const url = await postQuickChart(body);
-  return `<img src="${url}" alt="Execution Timeline" width="100%">`;
-}
-
-/** Mermaid fallback if QuickChart fails */
-function buildGanttFallback(ganttJob: GanttJob): string {
-  const lines: string[] = [
-    '```mermaid',
-    'gantt',
-    '  title Execution Timeline',
-    '  dateFormat x',
-    '  axisFormat %H:%M:%S',
-    `  section ${ganttJob.jobName.replace(/[:;]/g, '-')}`,
-  ];
-  for (const step of ganttJob.steps) {
-    const s = new Date(step.started_at).getTime();
-    const e = new Date(step.completed_at).getTime();
-    lines.push(`  ${step.name.replace(/[:;]/g, '-')} : ${s}, ${e}`);
+function buildGanttChart(ganttJob: GanttJob): string {
+  // Progressively keep only the longest-duration steps until URL fits.
+  let steps = ganttJob.steps;
+  while (steps.length > 0) {
+    const height = Math.max(160, Math.min(700, 56 + steps.length * 26));
+    const url = chartGetUrl(buildGanttChartString({ steps }), 1024, height);
+    if (url.length <= MAX_URL_LEN) {
+      return `<img src="${url}" alt="Execution Timeline" width="100%">`;
+    }
+    steps = keepLongest(steps, Math.max(1, Math.floor(steps.length * 0.6)));
   }
-  lines.push('```');
-  return lines.join('\n');
+  return '';
 }
 
 // ── Helpers: per-job section ─────────────────────────────────
 
-async function buildJobSection(report: AggregatedReport, sampleInterval: number): Promise<string> {
+function buildJobSection(report: AggregatedReport, sampleInterval: number): string {
   const parts: string[] = [];
 
   // Stat cards
   try {
-    parts.push(await buildStatCardsImage(report));
+    parts.push(buildStatCardsImage(report));
   } catch {
-    parts.push(buildStatCardsFallback(report));
+    parts.push('> **RunnerLens:** unable to generate stat cards chart');
   }
 
   // CPU + Memory charts
@@ -655,7 +566,7 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
   const timeline = report.timeline;
   if (timeline && timeline.cpu_pct.length >= 2) {
     try {
-      parts.push(await buildQuickChart(
+      parts.push(buildQuickChart(
         'CPU Usage (%)', timeline.cpu_pct, 'CPU %',
         CPU_COLOR, CPU_FILL,
         report.started_at, report.ended_at,
@@ -668,7 +579,7 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
       ));
       const toGb = (v: number) => Math.round((v / 1024) * 100) / 100;
       const memGb = timeline.mem_mb.map(toGb);
-      parts.push(await buildQuickChart(
+      parts.push(buildQuickChart(
         'Memory Usage (GB)', memGb, 'GB',
         MEM_COLOR, MEM_FILL,
         report.started_at, report.ended_at,
@@ -679,7 +590,7 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
         ],
       ));
     } catch {
-      // Best-effort: skip charts on failure
+      parts.push('> **RunnerLens:** unable to generate CPU/Memory charts');
     }
   }
 
@@ -688,18 +599,18 @@ async function buildJobSection(report: AggregatedReport, sampleInterval: number)
 
 // ── Public API ───────────────────────────────────────────────
 
-export async function buildJobSummary(report: AggregatedReport, sampleInterval: number): Promise<string> {
+export function buildJobSummary(report: AggregatedReport, sampleInterval: number): string {
   const parts: string[] = [];
 
-  parts.push(await buildJobSection(report, sampleInterval));
+  parts.push(buildJobSection(report, sampleInterval));
 
   // Gantt timeline
   const ganttJob = collectGanttSteps(report);
   if (ganttJob) {
     try {
-      parts.push(await buildGanttChart(ganttJob));
+      parts.push(buildGanttChart(ganttJob));
     } catch {
-      parts.push(buildGanttFallback(ganttJob));
+      parts.push('> **RunnerLens:** unable to generate execution timeline chart');
     }
   }
 

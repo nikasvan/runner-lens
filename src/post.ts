@@ -44,9 +44,6 @@ function stopCollector(): void {
  * The v2 collector rotates metrics.jsonl → metrics.jsonl.1 when it
  * exceeds --max-size. We read .1 first (older data) then the main
  * file (newer data) so samples are in chronological order.
- *
- * Uses line-by-line streaming to avoid loading the entire file (~200MB
- * worst case) into memory at once.
  */
 function loadSamples(): MetricSample[] {
   const files = [`${METRICS_FILE}.1`, METRICS_FILE].filter((f) =>
@@ -106,8 +103,6 @@ function loadSystemInfo(): SystemInfo {
 // ─────────────────────────────────────────────────────────────
 
 async function run(): Promise<void> {
-  const cpuStart = process.cpuUsage();
-
   try {
     if (core.getState(STATE.ACTIVE) !== 'true') {
       core.info('RunnerLens: monitoring was not active — nothing to report');
@@ -166,13 +161,6 @@ async function run(): Promise<void> {
     // ── Process ───────────────────────────────────────────
     const { report } = processMetrics(samples, sysInfo, dur, steps);
 
-    // ── Reporter self-monitoring ──────────────────────────
-    const cpuDelta = process.cpuUsage(cpuStart);
-    const cpuSec = (cpuDelta.user + cpuDelta.system) / 1e6;
-    const reporterCpuPct = dur > 0 ? (cpuSec / dur) * 100 : 0;
-    const reporterMemMb = process.memoryUsage().rss / (1024 * 1024);
-    report.reporter = { cpu_pct: reporterCpuPct, mem_mb: reporterMemMb };
-
     // ── Outputs ───────────────────────────────────────────
     core.setOutput('cpu-avg', report.cpu.avg.toFixed(1));
     core.setOutput('cpu-max', report.cpu.max.toFixed(1));
@@ -204,7 +192,7 @@ async function run(): Promise<void> {
 
     // ── Job Summary ─────────────────────────────────────
     try {
-      const summaryHtml = await buildJobSummary(report, config.sampleInterval);
+      const summaryHtml = buildJobSummary(report, config.sampleInterval);
       await core.summary.addRaw(summaryHtml).write();
     } catch (e) {
       core.debug(`RunnerLens: job summary failed — ${e}`);

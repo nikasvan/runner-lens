@@ -20,19 +20,24 @@ function aggregate(
       sample_count: 0,
       started_at: now,
       ended_at: now,
-      cpu: { avg: 0, max: 0, min: 0, p50: 0, p95: 0, p99: 0, latest: 0 },
-      memory: { avg: 0, max: 0, min: 0, p50: 0, p95: 0, p99: 0, latest: 0, total_mb: 0, swap_max_mb: 0 },
+      cpu: { avg: 0, max: 0, min: 0, latest: 0 },
+      memory: { avg: 0, max: 0, min: 0, latest: 0, total_mb: 0, swap_max_mb: 0 },
       load: { avg_1m: 0, max_1m: 0 },
     };
   }
 
-  const cpuStats = stats(samples.map((s) => s.cpu.usage));
-  const memStats = stats(samples.map((s) => s.memory.used_mb));
-  // Use the most commonly reported total_mb across samples (guards against
-  // a corrupted first sample reporting 0).
+  // Extract arrays once — reused for both stats and timeline.
+  const cpuUsage = samples.map((s) => s.cpu.usage);
+  const memUsed  = samples.map((s) => s.memory.used_mb);
+  const swapUsed = samples.map((s) => s.memory.swap_used_mb);
+
+  const cpuStats = stats(cpuUsage);
+  const memStats = stats(memUsed);
+  // Use the max reported total_mb across samples (guards against a
+  // corrupted sample reporting 0).
   const memTotals = samples.map((s) => s.memory.total_mb).filter((v) => v > 0);
   const memTotal = memTotals.length > 0 ? safeMax(memTotals) : 0;
-  const swapMax  = safeMax(samples.map((s) => s.memory.swap_used_mb));
+  const swapMax  = safeMax(swapUsed);
 
   const loadVals = samples.map((s) => s.load?.load1 ?? 0);
   const loadAvg  = loadVals.length > 0
@@ -41,27 +46,14 @@ function aggregate(
 
   const last = samples[samples.length - 1];
 
-  // ── Collector self-monitoring stats ─────────────────────
-  const collSamples = samples.filter((s) => s.collector);
-  let collector: AggregatedReport['collector'];
-  if (collSamples.length > 0) {
-    const cpuVals = collSamples.map((s) => s.collector!.cpu_pct);
-    const memVals = collSamples.map((s) => s.collector!.mem_mb);
-    collector = {
-      avg_cpu_pct: cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length,
-      avg_mem_mb: memVals.reduce((a, b) => a + b, 0) / memVals.length,
-      max_mem_mb: safeMax(memVals),
-    };
-  }
-
   const timeline = samples.length >= 2 ? {
-    cpu_pct: samples.map(s => s.cpu.usage),
+    cpu_pct: cpuUsage,
     cpu_user: samples.map(s => s.cpu.user),
     cpu_nice: samples.map(s => s.cpu.nice),
     cpu_system: samples.map(s => s.cpu.system),
-    mem_mb: samples.map(s => s.memory.used_mb),
+    mem_mb: memUsed,
     mem_cached_mb: samples.map(s => s.memory.cached_mb),
-    mem_swap_mb: samples.map(s => s.memory.swap_used_mb),
+    mem_swap_mb: swapUsed,
   } : undefined;
 
   const report: AggregatedReport = {
@@ -79,7 +71,6 @@ function aggregate(
     },
     ...(steps && steps.length > 0 ? { steps } : {}),
     ...(timeline ? { timeline } : {}),
-    ...(collector ? { collector } : {}),
   };
 
   return report;

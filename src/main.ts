@@ -2,7 +2,6 @@ import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { collectSystemInfo } from './system-info';
 import { parseConfig } from './config';
 import {
   DATA_DIR, METRICS_FILE, PID_FILE, SYSINFO_FILE, START_TS_FILE,
@@ -16,16 +15,6 @@ async function run(): Promise<void> {
     // ── Prepare workspace ─────────────────────────────────
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(START_TS_FILE, Date.now().toString());
-
-    // ── Collect static system info ────────────────────────
-    const sysInfo = await collectSystemInfo();
-    fs.writeFileSync(SYSINFO_FILE, JSON.stringify(sysInfo));
-
-    core.info(
-      `RunnerLens: ${sysInfo.cpu_count} CPUs · ` +
-      `${sysInfo.total_memory_mb} MB RAM · ` +
-      `sampling every ${cfg.sampleInterval}s`,
-    );
 
     // ── Resolve script path ───────────────────────────────
     // __dirname is dist/main/ after bundling → up two levels to action root
@@ -68,7 +57,17 @@ async function run(): Promise<void> {
       throw new Error(`Collector exited immediately (PID ${child.pid})`);
     }
 
-    core.info(`RunnerLens: collector started (PID ${child.pid})`);
+    // The collector writes sysinfo.json before entering its loop,
+    // so it's available after the 200ms health check above.
+    let infoMsg = `RunnerLens: collector started (PID ${child.pid})`;
+    try {
+      if (fs.existsSync(SYSINFO_FILE)) {
+        const si = JSON.parse(fs.readFileSync(SYSINFO_FILE, 'utf-8'));
+        infoMsg += ` · ${si.cpu_count} CPUs · ${si.total_memory_mb} MB RAM`;
+      }
+    } catch { /* best-effort */ }
+    infoMsg += ` · sampling every ${cfg.sampleInterval}s`;
+    core.info(infoMsg);
 
     // ── Persist state for the post step ───────────────────
     core.saveState(STATE.ACTIVE, 'true');

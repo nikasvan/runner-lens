@@ -10,9 +10,9 @@ branding:
 
 inputs:
   sample-interval:
-    description: 'Metric sampling interval in seconds (1–30)'
+    description: 'Metric sampling interval in seconds (1–60)'
     required: false
-    default: '3'
+    default: '5'
   github-token:
     description: 'GitHub token for per-step metrics (defaults to the built-in token)'
     required: false

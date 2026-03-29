@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { DefaultArtifactClient } from '@actions/artifact';
 import type { SystemInfo, StepMetrics } from './types';
+import { stopCollectorAndFlush } from './collector';
 import { parseConfig } from './config';
 import { loadSamples } from './metrics-jsonl';
 import { processMetrics } from './reporter';
@@ -12,32 +13,12 @@ import { fetchSteps, correlateSteps, type FetchStepsResult } from './steps';
 
 import { buildJobSummary } from './job-summary';
 import {
-  DATA_DIR, PID_FILE, SYSINFO_FILE, START_TS_FILE, STATE,
+  DATA_DIR, SYSINFO_FILE, START_TS_FILE, STATE,
 } from './constants';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
-
-function stopCollector(): void {
-  try {
-    if (!fs.existsSync(PID_FILE)) return;
-    const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
-    if (pid > 0) {
-      // Kill the entire process group (collector + child awk/ps/df).
-      // The collector is spawned with { detached: true } so it's a
-      // process group leader and -pid targets the whole group.
-      try { process.kill(-pid, 'SIGTERM'); } catch {
-        // If group kill fails (e.g. not a group leader), fall back to
-        // killing just the parent process.
-        try { process.kill(pid, 'SIGTERM'); } catch { /* already exited */ }
-      }
-      core.info(`RunnerLens: collector stopped (PID ${pid})`);
-    }
-  } catch (e) {
-    core.debug(`RunnerLens: stop error — ${e}`);
-  }
-}
 
 function loadSystemInfo(): SystemInfo {
   try {
@@ -70,11 +51,7 @@ async function run(): Promise<void> {
     const config  = parseConfig();
 
     // ── Stop collector & flush ────────────────────────────
-    stopCollector();
-    // Wait for the collector to handle SIGTERM, flush its last sample,
-    // and close the output file. 1200ms covers the worst case: one
-    // in-flight sample (~50ms) plus kernel signal delivery jitter.
-    await new Promise((r) => setTimeout(r, 1200));
+    await stopCollectorAndFlush();
 
     // ── Load data ─────────────────────────────────────────
     const samples = await loadSamples();

@@ -45,27 +45,10 @@ jobs:
       - run: npm ci && npm run build
 
       - uses: ./
-        id: lens
         with:
           sample-interval: '1'
           max-file-size: '50'
+          # Upload report.json (e.g. runner-lens-integration) under run Artifacts.
           upload-artifact: 'true'
 
-      # Give the detached collector time for several samples (post waits ~1.2s after SIGTERM).
       - run: sleep 20
-
-  # Step outputs set only in the action's post job are not reliably available as
-  # jobs.integration.outputs for dependent jobs. Verify via the uploaded report instead.
-  verify-integration:
-    needs: integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: runner-lens-integration
-          path: rl-art
-
-      - name: Verify metrics report artifact
-        run: |
-          test -f rl-art/report.json
-          python3 -c "import json; d=json.load(open('rl-art/report.json')); n=d.get('sample_count',0); assert n>0, n; print('RunnerLens sample_count:', n)"

@@ -121,7 +121,7 @@ async function run(): Promise<void> {
         await artClient.uploadArtifact(artifactName, [reportFile], DATA_DIR);
         core.info(`RunnerLens: uploaded artifact "${artifactName}"`);
       } catch (e) {
-        core.debug(`RunnerLens: artifact upload failed — ${e}`);
+        core.warning(`RunnerLens: artifact upload failed — ${e}`);
       }
     }
 

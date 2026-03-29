@@ -31,14 +31,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  # Outputs from actions with post: are only available after the job finishes (post runs last).
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    outputs:
-      # Hyphenated action outputs: use ['cpu-avg'] — dots parse as subtraction (cpu minus avg).
-      cpu-avg: ${{ steps.lens.outputs['cpu-avg'] }}
-      samples: ${{ steps.lens.outputs.samples }}
     steps:
       - uses: actions/checkout@v6
 
@@ -54,16 +49,23 @@ jobs:
         with:
           sample-interval: '1'
           max-file-size: '50'
+          upload-artifact: 'true'
 
-      - run: sleep 10
+      # Give the detached collector time for several samples (post waits ~1.2s after SIGTERM).
+      - run: sleep 20
 
+  # Step outputs set only in the action's post job are not reliably available as
+  # jobs.integration.outputs for dependent jobs. Verify via the uploaded report instead.
   verify-integration:
     needs: integration
     runs-on: ubuntu-latest
     steps:
-      - name: Verify outputs exist
+      - uses: actions/download-artifact@v4
+        with:
+          name: runner-lens-integration
+          path: rl-art
+
+      - name: Verify metrics report artifact
         run: |
-          echo "CPU avg: ${{ needs.integration.outputs['cpu-avg'] }}"
-          echo "Samples: ${{ needs.integration.outputs.samples }}"
-          test -n "${{ needs.integration.outputs['cpu-avg'] }}" || exit 1
-          test -n "${{ needs.integration.outputs.samples }}" || exit 1
+          test -f rl-art/report.json
+          python3 -c "import json; d=json.load(open('rl-art/report.json')); n=d.get('sample_count',0); assert n>0, n; print('RunnerLens sample_count:', n)"

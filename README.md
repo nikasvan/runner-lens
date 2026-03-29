@@ -112,14 +112,16 @@ For long-running jobs, the collector rotates the metrics file when it exceeds `m
 npm ci
 npm run typecheck    # TypeScript strict mode
 npm test             # Jest with coverage
-npm run build        # esbuild → dist/ (local CLI via node)
+npm run build        # node scripts/bundle.js → dist/ (esbuild JS API; PATH-safe)
 ```
 
 ### Project Structure
 
 ```
 ├── action.yml
-├── scripts/collect.sh
+├── scripts/
+│   ├── collect.sh           # Bash metrics collector
+│   └── bundle.js            # esbuild → dist/main + dist/post
 ├── src/
 │   ├── main.ts                # Entry: spawn collect.sh, write state
 │   ├── post.ts                # Post: stop collector, outputs, artifact, summary

@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as readline from 'readline';
 import { DefaultArtifactClient } from '@actions/artifact';
 import type { MetricSample, SystemInfo, StepMetrics } from './types';
 import { parseConfig } from './config';
@@ -38,6 +39,39 @@ function stopCollector(): void {
   }
 }
 
+function tryPushMetricLine(line: string, samples: MetricSample[]): void {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (
+      typeof parsed === 'object' && parsed !== null &&
+      typeof (parsed as MetricSample).timestamp === 'number' &&
+      (parsed as MetricSample).cpu && typeof (parsed as MetricSample).cpu.usage === 'number' &&
+      (parsed as MetricSample).memory && typeof (parsed as MetricSample).memory.used_mb === 'number'
+    ) {
+      samples.push(parsed as MetricSample);
+    }
+  } catch {
+    /* skip malformed lines */
+  }
+}
+
+/**
+ * Stream one JSONL file line-by-line (avoids holding the entire file in memory).
+ */
+async function appendSamplesFromFile(filePath: string, samples: MetricSample[]): Promise<void> {
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      tryPushMetricLine(line, samples);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 /**
  * Load JSONL samples from the metrics file AND the rotated .1 file.
  *
@@ -45,35 +79,14 @@ function stopCollector(): void {
  * exceeds --max-size. We read .1 first (older data) then the main
  * file (newer data) so samples are in chronological order.
  */
-function loadSamples(): MetricSample[] {
+async function loadSamples(): Promise<MetricSample[]> {
   const files = [`${METRICS_FILE}.1`, METRICS_FILE].filter((f) =>
     fs.existsSync(f),
   );
 
   const samples: MetricSample[] = [];
   for (const file of files) {
-    const content = fs.readFileSync(file, 'utf-8');
-    let start = 0;
-    while (start < content.length) {
-      let end = content.indexOf('\n', start);
-      if (end === -1) end = content.length;
-      const line = content.substring(start, end).trim();
-      start = end + 1;
-      if (!line) continue;
-      try {
-        const parsed = JSON.parse(line);
-        // Basic shape validation: must have timestamp and cpu.usage
-        if (
-          typeof parsed.timestamp === 'number' &&
-          parsed.cpu && typeof parsed.cpu.usage === 'number' &&
-          parsed.memory && typeof parsed.memory.used_mb === 'number'
-        ) {
-          samples.push(parsed as MetricSample);
-        }
-      } catch {
-        /* skip malformed lines */
-      }
-    }
+    await appendSamplesFromFile(file, samples);
   }
 
   // Ensure chronological order (rotation could cause minor overlap)
@@ -119,7 +132,7 @@ async function run(): Promise<void> {
     await new Promise((r) => setTimeout(r, 1200));
 
     // ── Load data ─────────────────────────────────────────
-    const samples = loadSamples();
+    const samples = await loadSamples();
     const sysInfo = loadSystemInfo();
 
     if (samples.length === 0) {

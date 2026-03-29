@@ -36,7 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
-      cpu-avg: ${{ steps.lens.outputs.cpu-avg }}
+      # Hyphenated action outputs: use ['cpu-avg'] — dots parse as subtraction (cpu minus avg).
+      cpu-avg: ${{ steps.lens.outputs['cpu-avg'] }}
       samples: ${{ steps.lens.outputs.samples }}
     steps:
       - uses: actions/checkout@v6
@@ -62,7 +63,7 @@ jobs:
     steps:
       - name: Verify outputs exist
         run: |
-          echo "CPU avg: ${{ needs.integration.outputs.cpu-avg }}"
+          echo "CPU avg: ${{ needs.integration.outputs['cpu-avg'] }}"
           echo "Samples: ${{ needs.integration.outputs.samples }}"
-          test -n "${{ needs.integration.outputs.cpu-avg }}" || exit 1
+          test -n "${{ needs.integration.outputs['cpu-avg'] }}" || exit 1
           test -n "${{ needs.integration.outputs.samples }}" || exit 1

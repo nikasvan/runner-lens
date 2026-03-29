@@ -15,9 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # ── Dogfood: monitor this CI job ────────────────────────
-      - uses: runnerlens/runner-lens@main
-
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
@@ -26,14 +23,21 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run typecheck
       - run: npm run build
+
+      # Dogfood: local action (dist/ must exist). Avoids runnerlens/runner-lens if that repo is unavailable.
+      - uses: ./
+
+      - run: npm run typecheck
       - run: npm test
 
-      # ── Integration: verify the action loads & produces output ──
+  # Outputs from actions with post: are only available after the job finishes (post runs last).
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      cpu-avg: ${{ steps.lens.outputs.cpu-avg }}
+      samples: ${{ steps.lens.outputs.samples }}
     steps:
       - uses: actions/checkout@v6
 
@@ -44,7 +48,6 @@ jobs:
 
       - run: npm ci && npm run build
 
-      # Use the local action (this repo)
       - uses: ./
         id: lens
         with:
@@ -53,10 +56,13 @@ jobs:
 
       - run: sleep 10
 
-      # Post step runs automatically; then check outputs
+  verify-integration:
+    needs: integration
+    runs-on: ubuntu-latest
+    steps:
       - name: Verify outputs exist
         run: |
-          echo "CPU avg: ${{ steps.lens.outputs.cpu-avg }}"
-          echo "Samples: ${{ steps.lens.outputs.samples }}"
-          test -n "${{ steps.lens.outputs.cpu-avg }}" || exit 1
-          test -n "${{ steps.lens.outputs.samples }}" || exit 1
+          echo "CPU avg: ${{ needs.integration.outputs.cpu-avg }}"
+          echo "Samples: ${{ needs.integration.outputs.samples }}"
+          test -n "${{ needs.integration.outputs.cpu-avg }}" || exit 1
+          test -n "${{ needs.integration.outputs.samples }}" || exit 1
